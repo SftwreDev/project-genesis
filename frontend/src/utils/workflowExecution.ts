@@ -1,0 +1,196 @@
+import type { Edge, Node } from '@xyflow/react';
+import type { CommandNodeData, TerminalLog, WorkflowGroup } from '../types';
+
+export function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    window.setTimeout(resolve, ms);
+  });
+}
+
+type WaitOptions = {
+  onTick?: (remainingMs: number) => void;
+  tickMs?: number;
+};
+
+export async function waitDuration(
+  ms: number,
+  appendLog: (level: TerminalLog['level'], message: string) => void,
+  label: string,
+  options: WaitOptions = {},
+) {
+  if (ms <= 0) return;
+
+  const { onTick, tickMs = 1_000 } = options;
+  const started = Date.now();
+  let lastLoggedMinute = -1;
+  let lastTickSecond = -1;
+
+  onTick?.(ms);
+
+  while (Date.now() - started < ms) {
+    const remaining = ms - (Date.now() - started);
+    const remainingSeconds = Math.ceil(remaining / 1_000);
+
+    if (onTick && remainingSeconds !== lastTickSecond) {
+      onTick(Math.max(0, remaining));
+      lastTickSecond = remainingSeconds;
+    }
+
+    const remainingMinutes = Math.ceil(remaining / 60_000);
+    if (remainingMinutes !== lastLoggedMinute && remaining >= 60_000) {
+      appendLog('system', `  ${label}: ~${remainingMinutes}m remaining`);
+      lastLoggedMinute = remainingMinutes;
+    }
+
+    await sleep(Math.min(remaining, tickMs));
+  }
+
+  onTick?.(0);
+}
+
+export function getEntryScheduleWait(
+  nodes: Node<CommandNodeData>[],
+  edges: Edge[],
+): { waitMs: number; targetLabel: string; nodeId: string } | null {
+  const nodeIds = new Set(nodes.map((node) => node.id));
+  const inDegree = new Map<string, number>();
+
+  for (const node of nodes) {
+    inDegree.set(node.id, 0);
+  }
+
+  for (const edge of edges) {
+    if (!nodeIds.has(edge.source) || !nodeIds.has(edge.target)) continue;
+    inDegree.set(edge.target, (inDegree.get(edge.target) ?? 0) + 1);
+  }
+
+  const entrySchedule = nodes.find(
+    (node) =>
+      node.data.commandId === 'workflow-schedule' && (inDegree.get(node.id) ?? 0) === 0,
+  );
+  if (!entrySchedule) return null;
+
+  const scheduledAt = entrySchedule.data.params.scheduledAt?.trim();
+  if (!scheduledAt) return null;
+
+  const target = new Date(scheduledAt);
+  if (Number.isNaN(target.getTime())) return null;
+
+  return {
+    waitMs: Math.max(0, target.getTime() - Date.now()),
+    targetLabel: target.toLocaleString(),
+    nodeId: entrySchedule.id,
+  };
+}
+
+type ExecuteCallbacks = {
+  appendLog: (level: TerminalLog['level'], message: string) => void;
+  updateNodeStatus: (nodeId: string, status: CommandNodeData['runStatus']) => void;
+  updateNodeTimer?: (
+    nodeId: string,
+    timer: { seconds: number | null; totalSeconds?: number | null },
+  ) => void;
+};
+
+export async function executeDelayNode(
+  node: Node<CommandNodeData>,
+  { appendLog, updateNodeStatus, updateNodeTimer }: ExecuteCallbacks,
+): Promise<boolean> {
+  const raw = node.data.params.delaySeconds?.trim() || '5';
+  const seconds = Number.parseInt(raw, 10);
+
+  if (Number.isNaN(seconds) || seconds < 0) {
+    updateNodeStatus(node.id, 'error');
+    updateNodeTimer?.(node.id, { seconds: null, totalSeconds: null });
+    appendLog('error', `❌ [Delay] Invalid delay seconds: "${raw}"`);
+    return false;
+  }
+
+  updateNodeStatus(node.id, 'running');
+  updateNodeTimer?.(node.id, { seconds, totalSeconds: seconds });
+  appendLog('run', `⏳ [Delay] Waiting ${seconds}s before next step...`);
+
+  await waitDuration(seconds * 1_000, appendLog, 'Delay', {
+    tickMs: 250,
+    onTick: (remainingMs) => {
+      updateNodeTimer?.(node.id, {
+        seconds: Math.ceil(remainingMs / 1_000),
+        totalSeconds: seconds,
+      });
+    },
+  });
+
+  updateNodeTimer?.(node.id, { seconds: null, totalSeconds: null });
+  updateNodeStatus(node.id, 'success');
+  appendLog('success', `✓ [Delay] Waited ${seconds}s`);
+  return true;
+}
+
+export async function executeScheduleNode(
+  node: Node<CommandNodeData>,
+  { appendLog, updateNodeStatus }: ExecuteCallbacks,
+): Promise<boolean> {
+  const scheduledAt = node.data.params.scheduledAt?.trim();
+  if (!scheduledAt) {
+    updateNodeStatus(node.id, 'error');
+    appendLog('error', '❌ [Schedule] Run At time is required');
+    return false;
+  }
+
+  const target = new Date(scheduledAt);
+  if (Number.isNaN(target.getTime())) {
+    updateNodeStatus(node.id, 'error');
+    appendLog('error', `❌ [Schedule] Invalid date/time: "${scheduledAt}"`);
+    return false;
+  }
+
+  const waitMs = target.getTime() - Date.now();
+  updateNodeStatus(node.id, 'running');
+
+  if (waitMs <= 0) {
+    updateNodeStatus(node.id, 'success');
+    appendLog('success', `✓ [Schedule] ${target.toLocaleString()} already passed — continuing`);
+    return true;
+  }
+
+  appendLog('run', `⏰ [Schedule] Waiting until ${target.toLocaleString()}...`);
+  await waitDuration(waitMs, appendLog, 'Schedule');
+
+  updateNodeStatus(node.id, 'success');
+  appendLog('success', `✓ [Schedule] Target time reached — continuing`);
+  return true;
+}
+
+export function syncNodeWorkflowGroups(
+  nodes: Node<CommandNodeData>[],
+  groups: WorkflowGroup[],
+): Node<CommandNodeData>[] {
+  const nodeToGroup = new Map<string, WorkflowGroup>();
+  for (const group of groups) {
+    for (const nodeId of group.nodeIds) {
+      nodeToGroup.set(nodeId, group);
+    }
+  }
+
+  return nodes.map((node) => {
+    const group = nodeToGroup.get(node.id);
+    return {
+      ...node,
+      data: {
+        ...node.data,
+        workflowGroupId: group?.id,
+        workflowGroupName: group?.name,
+        workflowGroupColor: group?.color,
+      },
+    };
+  });
+}
+
+export function removeNodeFromGroups(groups: WorkflowGroup[], nodeId: string): WorkflowGroup[] {
+  return groups
+    .map((group) => ({
+      ...group,
+      nodeIds: group.nodeIds.filter((id) => id !== nodeId),
+    }))
+    .filter((group) => group.nodeIds.length > 0);
+}
