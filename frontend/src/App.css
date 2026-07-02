@@ -2058,6 +2058,94 @@ body.terminal-maximized {
   flex-shrink: 0;
 }
 
+.terminal__pane .terminal__log-view {
+  flex: 1;
+  min-height: 0;
+}
+
+.terminal__single-view {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+}
+
+.terminal__log-view {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.terminal__search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.1);
+  background: rgba(15, 23, 42, 0.65);
+  flex-shrink: 0;
+}
+
+.terminal__search-icon {
+  color: #64748b;
+  flex-shrink: 0;
+}
+
+.terminal__search-input {
+  flex: 1;
+  min-width: 0;
+  padding: 3px 8px;
+  border-radius: 6px;
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  background: rgba(2, 6, 23, 0.55);
+  color: #e2e8f0;
+  font: inherit;
+  font-size: 0.72rem;
+}
+
+.terminal__search-input:focus {
+  outline: none;
+  border-color: rgba(56, 189, 248, 0.45);
+  box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.15);
+}
+
+.terminal__search-input::-webkit-search-cancel-button {
+  display: none;
+}
+
+.terminal__search-count {
+  font-size: 0.66rem;
+  color: #94a3b8;
+  white-space: nowrap;
+  flex-shrink: 0;
+  min-width: 28px;
+  text-align: center;
+}
+
+.terminal__search-nav,
+.terminal__search-clear {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: #94a3b8;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.terminal__search-nav:hover,
+.terminal__search-clear:hover {
+  color: #f8fafc;
+  background: rgba(148, 163, 184, 0.14);
+}
+
 .terminal__pane .terminal__body {
   flex: 1;
   min-height: 0;
@@ -2100,6 +2188,27 @@ body.terminal-maximized {
 .terminal__line-text {
   flex: 1;
   min-width: 0;
+}
+
+.terminal__line--match {
+  background: rgba(251, 191, 36, 0.07);
+}
+
+.terminal__line--match-active {
+  background: rgba(251, 191, 36, 0.16);
+  border-left-color: rgba(251, 191, 36, 0.85) !important;
+}
+
+.terminal__mark {
+  background: rgba(251, 191, 36, 0.35);
+  color: inherit;
+  border-radius: 2px;
+  padding: 0 1px;
+}
+
+.terminal__mark--active {
+  background: rgba(251, 191, 36, 0.72);
+  box-shadow: 0 0 0 1px rgba(251, 191, 36, 0.85);
 }
 
 .terminal__line--system {
