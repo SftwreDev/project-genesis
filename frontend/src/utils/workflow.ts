@@ -143,32 +143,14 @@ function weaklyConnectedComponents(nodeIds: NodeIdSet, edges: Edge[]): NodeIdSet
   return components;
 }
 
-/** Expand partial picks so each touched workflow island runs in full. */
+/** Use exact canvas selection only — do not pull in connected but unselected nodes. */
 export function expandRunSelection(
   selectedIds: string[],
   nodes: Node<CommandNodeData>[],
-  edges: Edge[],
+  _edges: Edge[],
 ): string[] {
   const canvasIds = new Set(nodes.map((node) => node.id));
-  const selection = [...new Set(selectedIds.filter((id) => canvasIds.has(id)))];
-  if (selection.length === 0) return [];
-
-  const components = weaklyConnectedComponents(canvasIds, edges);
-  const touched = components.filter((component) =>
-    selection.some((id) => component.has(id)),
-  );
-
-  if (touched.length === 0) return selection;
-
-  if (touched.length === 1) {
-    return selection.length > 1 ? [...touched[0]] : selection;
-  }
-
-  const expanded = new Set<string>();
-  for (const component of sortComponentsByCanvas(touched, nodes)) {
-    for (const id of component) expanded.add(id);
-  }
-  return [...expanded];
+  return [...new Set(selectedIds.filter((id) => canvasIds.has(id)))];
 }
 
 export function topologicalSort(
