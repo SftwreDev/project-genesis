@@ -6,7 +6,7 @@ Visual kubectl workflow builder for Kubernetes. Drag commands onto a canvas, con
 
 - **Command library** — Pods, Deployments, Services, ConfigMaps, Nodes, Namespaces, taints/tolerations, and workflow tools (Delay, Schedule)
 - **Visual canvas** — Connect nodes top-to-bottom; execution follows graph order
-- **Saved projects** — Persist canvas workflows in PostgreSQL (nodes, edges, groups, contexts)
+- **Saved projects** — Persist canvas workflows in SQLite (nodes, edges, groups, contexts)
 - **Config panel** — Parameters, YAML editor (Tab/Shift+Tab indent), custom fields
 - **Kube context** — Global + per-node `--context`; upstream context flows downstream
 - **Namespace inheritance** — Namespace flows to connected downstream nodes
@@ -18,7 +18,6 @@ Visual kubectl workflow builder for Kubernetes. Drag commands onto a canvas, con
 
 - Go 1.26+
 - Node.js 18+ and npm
-- [Docker](https://docs.docker.com/get-docker/) + Docker Compose v2 (PostgreSQL only)
 - Working `~/.kube/config` and cluster access for kubectl commands
 
 ## Quick start
@@ -30,21 +29,20 @@ make dev
 
 Open **http://localhost:3310**
 
-| Service    | Port | Description        |
-|------------|------|--------------------|
-| Frontend   | 3310 | Vite dev server    |
-| Backend    | 8787 | Go API + `~/.kube` |
-| PostgreSQL | 5432 | Docker container   |
+| Service  | Port | Description     |
+|----------|------|-----------------|
+| Frontend | 3310 | Vite dev server |
+| Backend  | 8787 | Go API + `~/.kube` |
+
+Projects stored at `~/.genesis/genesis.db`.
 
 ## Makefile targets
 
 | Target | Description |
 |--------|-------------|
 | `make setup` | `go mod download` + `npm install` |
-| `make dev` | Docker Postgres + local backend + Vite |
-| `make db-up` | Start PostgreSQL container only |
-| `make db-down` | Stop PostgreSQL container |
-| `make backend` | Go API only (starts Postgres first) |
+| `make dev` | Local backend + Vite |
+| `make backend` | Go API only |
 | `make frontend` | Vite dev server only |
 
 ## Environment
@@ -53,21 +51,18 @@ Copy `.env.example` to `.env` and adjust if needed:
 
 | Variable | Default |
 |----------|---------|
-| `FRONTEND_PORT` | `3310` |
-| `BACKEND_PORT` | `8787` |
-| `POSTGRES_USER` | `genesis` |
-| `POSTGRES_PASSWORD` | `genesis` |
-| `POSTGRES_DB` | `genesis` |
-| `POSTGRES_PORT` | `5432` |
-| `DATABASE_URL` | `postgres://genesis:genesis@localhost:5432/genesis?sslmode=disable` |
+| `GENESIS_PORT` / `BACKEND_PORT` | `8787` |
+| `GENESIS_FRONTEND_PORT` / `FRONTEND_PORT` | `3310` |
+| `GENESIS_DB_PATH` | — (full path override) |
+| `GENESIS_DATA_DIR` | `~/.genesis` |
 
 ## Architecture
 
 ```
-┌──────────────┐   /api proxy   ┌─────────────┐   SQL    ┌────────────┐
-│ Vite + React │ ─────────────► │ Go API      │ ───────► │ PostgreSQL │
-│ (:3310)      │                │ ~/.kube     │          │ (Docker)   │
-└──────────────┘                └─────────────┘          └────────────┘
+┌──────────────┐   /api proxy   ┌─────────────┐   SQLite   ~/.genesis/
+│ Vite + React │ ─────────────► │ Go API      │ ─────────► genesis.db
+│ (:3310)      │                │ ~/.kube     │
+└──────────────┘                └─────────────┘
 ```
 
 ## License

@@ -3,66 +3,53 @@ package store
 import (
 	"database/sql"
 	"fmt"
-	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
-	_ "github.com/jackc/pgx/v5/stdlib"
+	_ "modernc.org/sqlite"
 )
 
 type Store struct {
 	db *sql.DB
 }
 
-func databaseURL() string {
-	if dsn := strings.TrimSpace(os.Getenv("DATABASE_URL")); dsn != "" {
-		return dsn
+func databasePath() string {
+	if path := strings.TrimSpace(os.Getenv("GENESIS_DB_PATH")); path != "" {
+		return path
 	}
 
-	host := envOr("POSTGRES_HOST", "localhost")
-	port := envOr("POSTGRES_PORT", "5432")
-	user := envOr("POSTGRES_USER", "genesis")
-	password := os.Getenv("POSTGRES_PASSWORD")
-	dbname := envOr("POSTGRES_DB", "genesis")
-	sslmode := envOr("POSTGRES_SSLMODE", "disable")
-
-	return fmt.Sprintf(
-		"postgres://%s:%s@%s:%s/%s?sslmode=%s",
-		url.QueryEscape(user),
-		url.QueryEscape(password),
-		host,
-		port,
-		url.PathEscape(dbname),
-		sslmode,
-	)
-}
-
-func envOr(key, fallback string) string {
-	if value := strings.TrimSpace(os.Getenv(key)); value != "" {
-		return value
+	if dir := strings.TrimSpace(os.Getenv("GENESIS_DATA_DIR")); dir != "" {
+		return filepath.Join(dir, "genesis.db")
 	}
-	return fallback
+
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "genesis.db"
+	}
+	return filepath.Join(home, ".genesis", "genesis.db")
 }
 
 func Open() (*Store, error) {
-	dsn := databaseURL()
-	if dsn == "" {
-		return nil, fmt.Errorf("DATABASE_URL or POSTGRES_* environment variables are required")
+	path := databasePath()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return nil, fmt.Errorf("create data dir: %w", err)
 	}
 
-	db, err := sql.Open("pgx", dsn)
+	dsn := fmt.Sprintf("file:%s?_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)", path)
+	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
-		return nil, fmt.Errorf("open postgres: %w", err)
+		return nil, fmt.Errorf("open sqlite: %w", err)
 	}
 
-	db.SetMaxOpenConns(10)
-	db.SetMaxIdleConns(5)
+	db.SetMaxOpenConns(1)
+	db.SetMaxIdleConns(1)
 	db.SetConnMaxLifetime(30 * time.Minute)
 
 	if err := db.Ping(); err != nil {
 		_ = db.Close()
-		return nil, fmt.Errorf("ping postgres: %w", err)
+		return nil, fmt.Errorf("ping sqlite: %w", err)
 	}
 
 	store := &Store{db: db}
@@ -86,9 +73,9 @@ func (s *Store) migrate() error {
 		CREATE TABLE IF NOT EXISTS workflow_projects (
 			id TEXT PRIMARY KEY,
 			name TEXT NOT NULL,
-			payload JSONB NOT NULL,
-			created_at BIGINT NOT NULL,
-			updated_at BIGINT NOT NULL
+			payload TEXT NOT NULL,
+			created_at INTEGER NOT NULL,
+			updated_at INTEGER NOT NULL
 		);
 		CREATE INDEX IF NOT EXISTS idx_workflow_projects_updated
 			ON workflow_projects(updated_at DESC);

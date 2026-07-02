@@ -31,7 +31,7 @@ func main() {
 		log.Fatalf("Failed to open workflow store: %v", err)
 	}
 	defer db.Close()
-	log.Println("Workflow project store ready (PostgreSQL).")
+	log.Println("Workflow project store ready (SQLite).")
 
 	r := mux.NewRouter()
 	k8sHandler := &handlers.K8sHandler{}
