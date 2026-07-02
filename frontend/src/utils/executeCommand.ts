@@ -6,13 +6,18 @@ import { executeDelayNode, executeScheduleNode } from './workflowExecution';
 import {
   formatKubeContextLabel,
   getDirectInheritedContext,
+  getDirectInheritedNamespace,
+  parseKubeContext,
   resolveEffectiveKubeContext,
+  resolveEffectiveNamespace,
   resolveEffectiveParams,
 } from './workflowContext';
+import type { RunController } from './runControl';
 
 export type ExecuteGraph = {
   nodes: Node<CommandNodeData>[];
   edges: Edge[];
+  globalContext?: string;
 };
 
 export function formatOutput(output: unknown): string {
@@ -41,6 +46,7 @@ type ExecuteCallbacks = {
     nodeId: string,
     timer: { seconds: number | null; totalSeconds?: number | null },
   ) => void;
+  control?: RunController;
 };
 
 function toolPreview(node: Node<CommandNodeData>): string {
@@ -56,7 +62,8 @@ function toolPreview(node: Node<CommandNodeData>): string {
 async function streamPodLogsToTerminal(
   params: Record<string, string>,
   appendLog: ExecuteCallbacks['appendLog'],
-): Promise<{ ok: boolean; status?: string; message?: string }> {
+  control?: RunController,
+): Promise<{ ok: boolean; stopped?: boolean; status?: string; message?: string }> {
   appendLog(
     'system',
     `  waiting for pod to leave Pending/Creating (up to ${params.waitSeconds || '60'}s)...`,
@@ -71,6 +78,7 @@ async function streamPodLogsToTerminal(
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ params }),
+    signal: control?.signal,
   });
 
   if (!response.ok) {
@@ -89,6 +97,11 @@ async function streamPodLogsToTerminal(
   let pending = '';
 
   while (true) {
+    if (control && !(await control.checkpoint())) {
+      await reader.cancel().catch(() => undefined);
+      return { ok: false, stopped: true };
+    }
+
     const { done, value } = await reader.read();
     if (done) break;
 
@@ -116,12 +129,16 @@ export async function executeCommandNode(
   callbacks: ExecuteCallbacks,
   graph?: ExecuteGraph,
 ): Promise<boolean> {
-  const { appendLog, updateNodeStatus } = callbacks;
+  const { appendLog, updateNodeStatus, control } = callbacks;
   const command = getCommandById(node.data.commandId);
   const label = command?.label ?? node.data.commandId;
   const effectiveParams = graph
-    ? resolveEffectiveParams(node, graph.nodes, graph.edges)
+    ? resolveEffectiveParams(node, graph.nodes, graph.edges, graph.globalContext ?? '')
     : node.data.params;
+
+  if (control && !(await control.checkpoint())) {
+    return false;
+  }
 
   if (node.data.commandId === 'workflow-delay') {
     return executeDelayNode(node, callbacks);
@@ -134,13 +151,29 @@ export async function executeCommandNode(
   updateNodeStatus(node.id, 'running');
 
   if (graph) {
-    const inherited = getDirectInheritedContext(node.id, graph.nodes, graph.edges);
-    const effectiveContext = resolveEffectiveKubeContext(node.id, graph.nodes, graph.edges);
-    if (inherited) {
-      appendLog('system', `  inherited kube context: ${formatKubeContextLabel(inherited)}`);
-    }
+    const inheritedCtx = getDirectInheritedContext(node.id, graph.nodes, graph.edges);
+    const ownCtx = parseKubeContext(node.data.context ?? '');
+    const effectiveContext = resolveEffectiveKubeContext(
+      node.id,
+      graph.nodes,
+      graph.edges,
+      graph.globalContext ?? '',
+    );
+    const inheritedNs = getDirectInheritedNamespace(node.id, graph.nodes, graph.edges);
+    const ownNs = node.data.params.namespace?.trim() ?? '';
+    const effectiveNs = resolveEffectiveNamespace(node.id, graph.nodes, graph.edges);
+
     if (effectiveContext) {
-      appendLog('system', `  using kube context: --context ${formatKubeContextLabel(effectiveContext)}`);
+      const source = ownCtx ? 'node override' : inheritedCtx ? 'inherited' : 'global default';
+      appendLog(
+        'system',
+        `  using kube context (${source}): --context ${formatKubeContextLabel(effectiveContext)}`,
+      );
+    }
+
+    if (effectiveNs) {
+      const source = ownNs ? 'node override' : inheritedNs ? 'inherited' : 'default';
+      appendLog('system', `  using namespace (${source}): ${effectiveNs}`);
     }
   }
 
@@ -160,7 +193,11 @@ export async function executeCommandNode(
 
   if (node.data.commandId === 'get-pod-logs') {
     try {
-      const result = await streamPodLogsToTerminal(effectiveParams, appendLog);
+      const result = await streamPodLogsToTerminal(effectiveParams, appendLog, control);
+      if (result.stopped || control?.isStopped()) {
+        updateNodeStatus(node.id, 'idle');
+        return false;
+      }
       if (!result.ok) {
         updateNodeStatus(node.id, 'error');
         return false;
@@ -169,7 +206,11 @@ export async function executeCommandNode(
       updateNodeStatus(node.id, 'success');
       appendLog('success', `✓ [${label}] ${result.message ?? 'Logs streamed'}`);
       return true;
-    } catch {
+    } catch (error) {
+      if (control?.isStopped() || (error instanceof DOMException && error.name === 'AbortError')) {
+        updateNodeStatus(node.id, 'idle');
+        return false;
+      }
       updateNodeStatus(node.id, 'error');
       appendLog('error', `❌ [${label}] Could not stream pod logs.`);
       return false;
@@ -184,6 +225,7 @@ export async function executeCommandNode(
         command: node.data.commandId,
         params: effectiveParams,
       }),
+      signal: control?.signal,
     });
 
     const data: CommandResponse = await response.json();
@@ -200,7 +242,11 @@ export async function executeCommandNode(
     if (data.status) appendLog('output', `  status: ${data.status}`);
     appendCommandOutput(appendLog, data.output);
     return true;
-  } catch {
+  } catch (error) {
+    if (control?.isStopped() || (error instanceof DOMException && error.name === 'AbortError')) {
+      updateNodeStatus(node.id, 'idle');
+      return false;
+    }
     updateNodeStatus(node.id, 'error');
     appendLog('error', `❌ [${label}] Could not reach Go backend.`);
     return false;

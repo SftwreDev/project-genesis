@@ -122,7 +122,7 @@ func (h *K8sHandler) ExecuteCommand(w http.ResponseWriter, r *http.Request) {
 
 	active, err := h.HandlerForParams(req.Params)
 	if err != nil {
-		w.WriteHeader(http.StatusBadRequest)
+		w.WriteHeader(http.StatusServiceUnavailable)
 		json.NewEncoder(w).Encode(CommandResponse{Error: err.Error()})
 		return
 	}

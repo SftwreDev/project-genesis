@@ -1,5 +1,6 @@
 import type { Edge, Node } from '@xyflow/react';
 import type { CommandNodeData, TerminalLog, WorkflowGroup } from '../types';
+import type { RunController } from './runControl';
 
 export function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => {
@@ -10,6 +11,7 @@ export function sleep(ms: number): Promise<void> {
 type WaitOptions = {
   onTick?: (remainingMs: number) => void;
   tickMs?: number;
+  control?: RunController;
 };
 
 export async function waitDuration(
@@ -17,10 +19,10 @@ export async function waitDuration(
   appendLog: (level: TerminalLog['level'], message: string) => void,
   label: string,
   options: WaitOptions = {},
-) {
-  if (ms <= 0) return;
+): Promise<boolean> {
+  if (ms <= 0) return true;
 
-  const { onTick, tickMs = 1_000 } = options;
+  const { onTick, tickMs = 1_000, control } = options;
   const started = Date.now();
   let lastLoggedMinute = -1;
   let lastTickSecond = -1;
@@ -28,6 +30,8 @@ export async function waitDuration(
   onTick?.(ms);
 
   while (Date.now() - started < ms) {
+    if (control && !(await control.checkpoint())) return false;
+
     const remaining = ms - (Date.now() - started);
     const remainingSeconds = Math.ceil(remaining / 1_000);
 
@@ -42,10 +46,16 @@ export async function waitDuration(
       lastLoggedMinute = remainingMinutes;
     }
 
-    await sleep(Math.min(remaining, tickMs));
+    const chunk = Math.min(remaining, tickMs);
+    if (control) {
+      if (!(await control.sleep(chunk))) return false;
+    } else {
+      await sleep(chunk);
+    }
   }
 
   onTick?.(0);
+  return true;
 }
 
 export function getEntryScheduleWait(
@@ -90,11 +100,12 @@ type ExecuteCallbacks = {
     nodeId: string,
     timer: { seconds: number | null; totalSeconds?: number | null },
   ) => void;
+  control?: import('./runControl').RunController;
 };
 
 export async function executeDelayNode(
   node: Node<CommandNodeData>,
-  { appendLog, updateNodeStatus, updateNodeTimer }: ExecuteCallbacks,
+  { appendLog, updateNodeStatus, updateNodeTimer, control }: ExecuteCallbacks,
 ): Promise<boolean> {
   const raw = node.data.params.delaySeconds?.trim() || '5';
   const seconds = Number.parseInt(raw, 10);
@@ -110,8 +121,9 @@ export async function executeDelayNode(
   updateNodeTimer?.(node.id, { seconds, totalSeconds: seconds });
   appendLog('run', `⏳ [Delay] Waiting ${seconds}s before next step...`);
 
-  await waitDuration(seconds * 1_000, appendLog, 'Delay', {
+  const waited = await waitDuration(seconds * 1_000, appendLog, 'Delay', {
     tickMs: 250,
+    control,
     onTick: (remainingMs) => {
       updateNodeTimer?.(node.id, {
         seconds: Math.ceil(remainingMs / 1_000),
@@ -121,6 +133,12 @@ export async function executeDelayNode(
   });
 
   updateNodeTimer?.(node.id, { seconds: null, totalSeconds: null });
+
+  if (!waited) {
+    updateNodeStatus(node.id, 'idle');
+    return false;
+  }
+
   updateNodeStatus(node.id, 'success');
   appendLog('success', `✓ [Delay] Waited ${seconds}s`);
   return true;
@@ -128,7 +146,7 @@ export async function executeDelayNode(
 
 export async function executeScheduleNode(
   node: Node<CommandNodeData>,
-  { appendLog, updateNodeStatus }: ExecuteCallbacks,
+  { appendLog, updateNodeStatus, control }: ExecuteCallbacks,
 ): Promise<boolean> {
   const scheduledAt = node.data.params.scheduledAt?.trim();
   if (!scheduledAt) {
@@ -154,7 +172,12 @@ export async function executeScheduleNode(
   }
 
   appendLog('run', `⏰ [Schedule] Waiting until ${target.toLocaleString()}...`);
-  await waitDuration(waitMs, appendLog, 'Schedule');
+  const waited = await waitDuration(waitMs, appendLog, 'Schedule', { control });
+
+  if (!waited) {
+    updateNodeStatus(node.id, 'idle');
+    return false;
+  }
 
   updateNodeStatus(node.id, 'success');
   appendLog('success', `✓ [Schedule] Target time reached — continuing`);

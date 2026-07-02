@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef } from 'react';
-import { GripHorizontal, Trash2, X } from 'lucide-react';
-import type { TerminalSession } from '../types';
+import { GripHorizontal, Pause, Play, Square, Trash2, X } from 'lucide-react';
+import type { TerminalLog, TerminalSession } from '../types';
 
 type Props = {
   sessions: TerminalSession[];
@@ -9,10 +9,22 @@ type Props = {
   onActiveSessionChange: (sessionId: string) => void;
   onCloseSession: (sessionId: string) => void;
   onClearSession: (sessionId: string) => void;
+  onPauseRun?: (sessionId: string) => void;
+  onResumeRun?: (sessionId: string) => void;
+  onStopRun?: (sessionId: string) => void;
   onHeightChange: (height: number) => void;
 };
 
 const MIN_HEIGHT = 120;
+
+const LOG_BADGE: Record<TerminalLog['level'], string> = {
+  system: 'SYS',
+  run: 'RUN',
+  success: 'OK',
+  error: 'ERR',
+  output: 'OUT',
+  warn: 'WARN',
+};
 
 export default function ExecutionTerminal({
   sessions,
@@ -21,6 +33,9 @@ export default function ExecutionTerminal({
   onActiveSessionChange,
   onCloseSession,
   onClearSession,
+  onPauseRun,
+  onResumeRun,
+  onStopRun,
   onHeightChange,
 }: Props) {
   const bodyRef = useRef<HTMLDivElement>(null);
@@ -119,15 +134,49 @@ export default function ExecutionTerminal({
             </button>
           ))}
         </div>
-        <button type="button" className="terminal__clear" onClick={() => onClearSession(activeSession.id)}>
-          <Trash2 size={14} />
-          Clear
-        </button>
+        <div className="terminal__header-actions">
+          {(activeSession.status === 'running' || activeSession.status === 'paused') && (
+            <div className="terminal__controls">
+              {activeSession.status === 'running' ? (
+                <button
+                  type="button"
+                  className="terminal__control terminal__control--pause"
+                  onClick={() => onPauseRun?.(activeSession.id)}
+                >
+                  <Pause size={14} />
+                  Pause
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="terminal__control terminal__control--resume"
+                  onClick={() => onResumeRun?.(activeSession.id)}
+                >
+                  <Play size={14} />
+                  Resume
+                </button>
+              )}
+              <button
+                type="button"
+                className="terminal__control terminal__control--stop"
+                onClick={() => onStopRun?.(activeSession.id)}
+              >
+                <Square size={14} />
+                Stop
+              </button>
+            </div>
+          )}
+          <button type="button" className="terminal__clear" onClick={() => onClearSession(activeSession.id)}>
+            <Trash2 size={14} />
+            Clear
+          </button>
+        </div>
       </header>
       <div className="terminal__body" ref={bodyRef}>
         {activeSession.logs.map((log) => (
           <div key={log.id} className={`terminal__line terminal__line--${log.level}`}>
-            {log.message}
+            <span className="terminal__line-badge">{LOG_BADGE[log.level]}</span>
+            <span className="terminal__line-text">{log.message}</span>
           </div>
         ))}
       </div>

@@ -67,9 +67,36 @@ export type WorkflowGroup = {
   frame?: WorkflowGroupFrame;
 };
 
+export type SavedKubeContext = {
+  id: string;
+  name: string;
+  enabled: boolean;
+};
+
+export type WorkflowProjectPayload = {
+  nodes: import('@xyflow/react').Node<CommandNodeData>[];
+  edges: import('@xyflow/react').Edge[];
+  workflowGroups: WorkflowGroup[];
+  savedContexts?: SavedKubeContext[];
+};
+
+export type WorkflowProjectSummary = {
+  id: string;
+  name: string;
+  nodeCount: number;
+  edgeCount: number;
+  groupCount: number;
+  createdAt: number;
+  updatedAt: number;
+};
+
+export type WorkflowProject = WorkflowProjectSummary & {
+  payload: WorkflowProjectPayload;
+};
+
 export type TerminalLog = {
   id: string;
-  level: 'system' | 'run' | 'success' | 'error' | 'output';
+  level: 'system' | 'run' | 'success' | 'error' | 'output' | 'warn';
   message: string;
 };
 
@@ -77,7 +104,7 @@ export type TerminalSession = {
   id: string;
   name: string;
   logs: TerminalLog[];
-  status: 'running' | 'complete' | 'error';
+  status: 'running' | 'paused' | 'complete' | 'error' | 'stopped';
   createdAt: number;
   workflowSignature?: string;
 };

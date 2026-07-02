@@ -1,10 +1,13 @@
-import { memo } from 'react';
-import { Handle, Position, type NodeProps } from '@xyflow/react';
+import { memo, useMemo } from 'react';
+import { Handle, Position, type Edge, type Node, type NodeProps } from '@xyflow/react';
 import { Clock, Play, Timer, X } from 'lucide-react';
 import { isWorkflowTool } from '../data/k8sCommands';
 import type { CommandNodeData } from '../types';
 import { formatCommandPreview, getCustomParams, splitKubectlWithContext } from '../utils/commandPreview';
-import { parseKubeContext } from '../utils/workflowContext';
+import {
+  resolveEffectiveKubeContext,
+  resolveEffectiveNamespace,
+} from '../utils/workflowContext';
 
 const statusLabel: Record<CommandNodeData['runStatus'], string> = {
   idle: 'Ready',
@@ -17,6 +20,9 @@ type CommandNodeProps = NodeProps & {
   onRunNode?: (nodeId: string) => void;
   onDeleteNode?: (nodeId: string) => void;
   isRunning?: boolean;
+  globalContext?: string;
+  workflowNodes?: Node<CommandNodeData>[];
+  workflowEdges?: Edge[];
 };
 
 function formatDelayTimer(seconds: number): string {
@@ -28,7 +34,17 @@ function formatDelayTimer(seconds: number): string {
   return `${seconds}s`;
 }
 
-function CommandNode({ id, data, selected, onRunNode, onDeleteNode, isRunning }: CommandNodeProps) {
+function CommandNode({
+  id,
+  data,
+  selected,
+  onRunNode,
+  onDeleteNode,
+  isRunning,
+  globalContext = '',
+  workflowNodes = [],
+  workflowEdges = [],
+}: CommandNodeProps) {
   const nodeData = data as CommandNodeData;
   const isTool = isWorkflowTool(nodeData.commandId);
   const isDelayRunning =
@@ -42,13 +58,24 @@ function CommandNode({ id, data, selected, onRunNode, onDeleteNode, isRunning }:
     nodeData.timerSeconds != null
       ? ((nodeData.timerTotalSeconds - nodeData.timerSeconds) / nodeData.timerTotalSeconds) * 100
       : 0;
-  const kubeContext = parseKubeContext(nodeData.context ?? '');
-  const kubectlParts = splitKubectlWithContext(nodeData.kubectl, nodeData.params, kubeContext);
-  const customParams = getCustomParams(nodeData.commandId, nodeData.params);
+
+  const previewParams = useMemo(() => {
+    const effectiveNamespace = resolveEffectiveNamespace(id, workflowNodes, workflowEdges);
+    if (!effectiveNamespace) return nodeData.params;
+    return { ...nodeData.params, namespace: effectiveNamespace };
+  }, [id, nodeData.params, workflowEdges, workflowNodes]);
+
+  const kubeContext = useMemo(
+    () => resolveEffectiveKubeContext(id, workflowNodes, workflowEdges, globalContext),
+    [globalContext, id, workflowEdges, workflowNodes],
+  );
+
+  const kubectlParts = splitKubectlWithContext(nodeData.kubectl, previewParams, kubeContext);
+  const customParams = getCustomParams(nodeData.commandId, previewParams);
   const preview = formatCommandPreview(
     nodeData.commandId,
     nodeData.kubectl,
-    nodeData.params,
+    previewParams,
     kubeContext,
   );
 

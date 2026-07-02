@@ -1,13 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
-import { FolderKanban, MousePointer2, Play, Trash2, X } from 'lucide-react';
+import { FolderKanban, Play, Trash2, X } from 'lucide-react';
 import type { WorkflowGroup } from '../types';
 
 type Props = {
   groups: WorkflowGroup[];
   selectedNodeIds: string[];
-  groupMode: boolean;
   runningGroupIds: Set<string>;
-  onGroupModeChange: (enabled: boolean) => void;
   onSaveGroup: (name: string, nodeIds: string[]) => void;
   onRunGroup: (groupId: string) => void;
   onDeleteGroup: (groupId: string) => void;
@@ -17,9 +15,7 @@ type Props = {
 export default function WorkflowGroupMenu({
   groups,
   selectedNodeIds,
-  groupMode,
   runningGroupIds,
-  onGroupModeChange,
   onSaveGroup,
   onRunGroup,
   onDeleteGroup,
@@ -73,19 +69,8 @@ export default function WorkflowGroupMenu({
             </button>
           </div>
 
-          <button
-            type="button"
-            className={`workflow-groups__mode${groupMode ? ' workflow-groups__mode--active' : ''}`}
-            onClick={() => onGroupModeChange(!groupMode)}
-          >
-            <MousePointer2 size={14} />
-            {groupMode ? 'Selection mode on' : 'Enable selection mode'}
-          </button>
-
           <p className="workflow-groups__hint">
-            {groupMode
-              ? 'Drag on canvas to highlight nodes. Shift+click also works.'
-              : 'Turn on selection mode, highlight nodes, then save a group.'}
+            Drag on canvas to highlight nodes. Shift+click to add. Drag a selected node to move all together.
           </p>
 
           <div className="workflow-groups__save">

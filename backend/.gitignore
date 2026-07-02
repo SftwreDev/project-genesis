@@ -1,0 +1,3 @@
+# Built UI assets are regenerated before release builds.
+web/dist/*
+!web/dist/index.html

@@ -1,10 +1,15 @@
 import { useMemo, useRef, useState } from 'react';
-import type { Node } from '@xyflow/react';
+import type { Edge, Node } from '@xyflow/react';
 import { FileCode2, Settings2, SlidersHorizontal } from 'lucide-react';
 import { getCommandById, isWorkflowTool } from '../data/k8sCommands';
 import type { CommandNodeData } from '../types';
 import { formatCommandPreview, generateYaml, isReservedParamKey } from '../utils/commandPreview';
-import { formatKubeContextLabel, parseKubeContext } from '../utils/workflowContext';
+import {
+  formatKubeContextLabel,
+  parseKubeContext,
+  resolveEffectiveKubeContext,
+  resolveEffectiveNamespace,
+} from '../utils/workflowContext';
 import { applyYamlEditorKey } from '../utils/yamlEditor';
 
 type Tab = 'params' | 'yaml';
@@ -12,6 +17,10 @@ type Tab = 'params' | 'yaml';
 type Props = {
   node: Node<CommandNodeData> | null;
   inheritedContext?: string;
+  inheritedNamespace?: string;
+  globalContext?: string;
+  nodes: Node<CommandNodeData>[];
+  edges: Edge[];
   onParamChange: (nodeId: string, key: string, value: string) => void;
   onCustomFieldAdd: (nodeId: string, key: string, value: string) => void;
   onCustomFieldRemove: (nodeId: string, key: string) => void;
@@ -22,6 +31,10 @@ type Props = {
 export default function NodeConfigurator({
   node,
   inheritedContext = '',
+  inheritedNamespace = '',
+  globalContext = '',
+  nodes,
+  edges,
   onParamChange,
   onCustomFieldAdd,
   onCustomFieldRemove,
@@ -38,17 +51,24 @@ export default function NodeConfigurator({
     const command = getCommandById(node.data.commandId);
     if (!command) return null;
 
+    const effectiveContext = resolveEffectiveKubeContext(node.id, nodes, edges, globalContext);
+    const effectiveNamespace = resolveEffectiveNamespace(node.id, nodes, edges);
+    const previewParams = {
+      ...node.data.params,
+      ...(effectiveNamespace ? { namespace: effectiveNamespace } : {}),
+    };
+
     return {
       command,
       kubectl: formatCommandPreview(
         node.data.commandId,
         command.kubectl,
-        node.data.params,
-        parseKubeContext(node.data.context ?? '') || inheritedContext,
+        previewParams,
+        effectiveContext,
       ),
-      yaml: node.data.yamlContent || generateYaml(node.data.commandId, node.data.params),
+      yaml: node.data.yamlContent || generateYaml(node.data.commandId, previewParams),
     };
-  }, [inheritedContext, node]);
+  }, [edges, globalContext, node, nodes]);
 
   if (!node || !preview) {
     return (
@@ -62,6 +82,7 @@ export default function NodeConfigurator({
 
   const { command } = preview;
   const isTool = isWorkflowTool(command.id);
+  const effectiveNamespace = resolveEffectiveNamespace(node.id, nodes, edges);
   const definedKeys = new Set(command.fields.map((f) => f.key));
   const customEntries = Object.entries(node.data.params).filter(
     ([key]) => !definedKeys.has(key) && !isReservedParamKey(key),
@@ -121,8 +142,14 @@ export default function NodeConfigurator({
         <div className="config-panel__fields">
           <h4>Kube Context (optional)</h4>
           <p className="config-panel__hint">
-            kubectl --context value from ~/.kube/config. Downstream connected nodes inherit this at run time.
+            kubectl --context from ~/.kube/config. Overrides global + upstream inherited context for this node.
           </p>
+          {globalContext && !parseKubeContext(node.data.context ?? '') && !inheritedContext && (
+            <div className="config-panel__inherited-context config-panel__inherited-context--global">
+              <span>Global default</span>
+              <code>--context {formatKubeContextLabel(globalContext)}</code>
+            </div>
+          )}
           {inheritedContext && (
             <div className="config-panel__inherited-context">
               <span>Inherited from upstream</span>
@@ -135,18 +162,28 @@ export default function NodeConfigurator({
               type="text"
               value={node.data.context ?? ''}
               onChange={(e) => onContextChange(node.id, e.target.value)}
-              placeholder="test-prod"
+              placeholder={globalContext || inheritedContext || 'test-prod'}
             />
           </label>
 
           <h4>Parameters</h4>
+          {inheritedNamespace && !node.data.params.namespace?.trim() && (
+            <div className="config-panel__inherited-context">
+              <span>Inherited namespace from upstream</span>
+              <code>{inheritedNamespace}</code>
+            </div>
+          )}
           {command.fields.map((field) => (
             <label key={field.key} className="config-panel__field">
               <span>{field.label}</span>
               <input
                 type={field.inputType ?? 'text'}
                 min={field.inputType === 'number' ? 0 : undefined}
-                value={node.data.params[field.key] ?? ''}
+                value={
+                  field.key === 'namespace'
+                    ? node.data.params[field.key]?.trim() || effectiveNamespace || ''
+                    : (node.data.params[field.key] ?? '')
+                }
                 onChange={(e) => onParamChange(node.id, field.key, e.target.value)}
                 placeholder={field.placeholder}
               />

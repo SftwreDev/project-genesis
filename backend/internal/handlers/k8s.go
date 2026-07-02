@@ -16,13 +16,16 @@ type K8sHandler struct {
 	Client *kubernetes.Clientset
 }
 
+func (h *K8sHandler) clientForRequest(contextName string) (*kubernetes.Clientset, error) {
+	if h != nil && h.Client != nil && strings.TrimSpace(contextName) == "" {
+		return h.Client, nil
+	}
+	return k8s.GetClientForContext(contextName)
+}
+
 func (h *K8sHandler) HandlerForParams(params map[string]string) (*K8sHandler, error) {
 	ctxName := strings.TrimSpace(params["context"])
-	if ctxName == "" {
-		return h, nil
-	}
-
-	client, err := k8s.GetClientForContext(ctxName)
+	client, err := h.clientForRequest(ctxName)
 	if err != nil {
 		return nil, err
 	}
@@ -48,7 +51,14 @@ type CommandResponse struct {
 func (h *K8sHandler) GetPods(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
-	pods, err := h.Client.CoreV1().Pods("default").List(r.Context(), metav1.ListOptions{})
+	client, err := h.clientForRequest("")
+	if err != nil {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		json.NewEncoder(w).Encode(CommandResponse{Error: err.Error()})
+		return
+	}
+
+	pods, err := client.CoreV1().Pods("default").List(r.Context(), metav1.ListOptions{})
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		json.NewEncoder(w).Encode(CommandResponse{Error: err.Error()})
@@ -62,8 +72,15 @@ func (h *K8sHandler) GetPods(w http.ResponseWriter, r *http.Request) {
 func (h *K8sHandler) CreatePod(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
+	client, err := h.clientForRequest("")
+	if err != nil {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		json.NewEncoder(w).Encode(CommandResponse{Error: err.Error()})
+		return
+	}
+
 	var req CreatePodRequest
-	err := json.NewDecoder(r.Body).Decode(&req)
+	err = json.NewDecoder(r.Body).Decode(&req)
 	if err != nil || req.PodName == "" {
 		w.WriteHeader(http.StatusBadRequest)
 		json.NewEncoder(w).Encode(CommandResponse{Error: "Invalid configuration specifications payload"})
@@ -91,7 +108,7 @@ func (h *K8sHandler) CreatePod(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Commit directly to your active local context kube-api server
-	createdPod, err := h.Client.CoreV1().Pods("default").Create(context.TODO(), podManifest, metav1.CreateOptions{})
+	createdPod, err := client.CoreV1().Pods("default").Create(context.TODO(), podManifest, metav1.CreateOptions{})
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		json.NewEncoder(w).Encode(CommandResponse{Error: err.Error()})

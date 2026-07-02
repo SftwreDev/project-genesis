@@ -5,7 +5,6 @@ import {
   Controls,
   Background,
   BackgroundVariant,
-  addEdge,
   useReactFlow,
   type Connection,
   type Edge,
@@ -34,7 +33,6 @@ type Props = {
   onNodesChange: OnNodesChange<Node<CommandNodeData>>;
   onEdgesChange: OnEdgesChange<Edge>;
   setNodes: React.Dispatch<React.SetStateAction<Node<CommandNodeData>[]>>;
-  setEdges: React.Dispatch<React.SetStateAction<Edge[]>>;
   onNodeSelect: (node: Node<CommandNodeData> | null) => void;
   onSelectionChange: (nodeIds: string[]) => void;
   onRunNode: (nodeId: string) => void;
@@ -46,7 +44,8 @@ type Props = {
   highlightedGroupId: string | null;
   runningGroupIds: Set<string>;
   isRunning: boolean;
-  groupMode: boolean;
+  globalContext?: string;
+  onConnect: (connection: Connection) => void;
 };
 
 function isGroupBackgroundNode(id: string) {
@@ -60,7 +59,6 @@ export default function FlowCanvas({
   onNodesChange,
   onEdgesChange,
   setNodes,
-  setEdges,
   onNodeSelect,
   onSelectionChange,
   onRunNode,
@@ -72,7 +70,8 @@ export default function FlowCanvas({
   highlightedGroupId,
   runningGroupIds,
   isRunning,
-  groupMode,
+  globalContext = '',
+  onConnect: onConnectProp,
 }: Props) {
   const { screenToFlowPosition } = useReactFlow();
 
@@ -123,6 +122,9 @@ export default function FlowCanvas({
           onRunNode={onRunNode}
           onDeleteNode={onDeleteNode}
           isRunning={isRunning}
+          globalContext={globalContext}
+          workflowNodes={nodes}
+          workflowEdges={edges}
         />
       ),
       groupBackground: (props: NodeProps) => (
@@ -135,7 +137,7 @@ export default function FlowCanvas({
         />
       ),
     }),
-    [onDeleteGroupNodes, onDeleteNode, onResizeGroup, onRunGroup, onRunNode, onUngroupGroup, isRunning],
+    [edges, globalContext, nodes, onDeleteGroupNodes, onDeleteNode, onResizeGroup, onRunGroup, onRunNode, onUngroupGroup, isRunning],
   );
 
   const handleNodesChange = useCallback(
@@ -151,8 +153,8 @@ export default function FlowCanvas({
   );
 
   const onConnect = useCallback(
-    (params: Connection) => setEdges((eds) => addEdge({ ...params, animated: true }, eds)),
-    [setEdges],
+    (params: Connection) => onConnectProp(params),
+    [onConnectProp],
   );
 
   const onDragOver = useCallback((event: React.DragEvent) => {
@@ -189,7 +191,7 @@ export default function FlowCanvas({
       onSelectionChange(commandNodes.map((node) => node.id));
       if (commandNodes.length === 1) {
         onNodeSelect(commandNodes[0] as Node<CommandNodeData>);
-      } else if (commandNodes.length === 0) {
+      } else {
         onNodeSelect(null);
       }
     },
@@ -211,9 +213,14 @@ export default function FlowCanvas({
           onNodeSelect(node as Node<CommandNodeData>);
         }}
         onPaneClick={() => onNodeSelect(null)}
-        selectionOnDrag={groupMode}
-        panOnDrag={groupMode ? [1, 2] : true}
+        nodesDraggable
+        elementsSelectable
+        selectionOnDrag
+        panOnDrag={[1, 2]}
         multiSelectionKeyCode="Shift"
+        elevateNodesOnSelect
+        minZoom={0.15}
+        maxZoom={2}
         defaultEdgeOptions={{ animated: true, style: { stroke: '#569cd6' } }}
         proOptions={{ hideAttribution: true }}
       >
