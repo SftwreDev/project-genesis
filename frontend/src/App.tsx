@@ -69,7 +69,7 @@ function createTerminalSession(name: string, starterLogs?: TerminalLog[]): Termi
       starterLogs ??
       [
         makeLog('system', 'system: Project:Genesis ready — drag commands, connect, configure, run.'),
-        makeLog('system', 'system: Project:Genesis ready'),
+        makeLog('system', `system: Backend proxy → localhost:${import.meta.env.VITE_BACKEND_PORT ?? '8787'}`),
       ],
     status: 'complete',
     createdAt: Date.now(),

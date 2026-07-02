@@ -6,10 +6,6 @@ const frontendPort = Number(process.env.GENESIS_FRONTEND_PORT ?? 3310)
 
 export default defineConfig({
   plugins: [react()],
-  build: {
-    outDir: '../backend/web/dist',
-    emptyOutDir: true,
-  },
   server: {
     port: frontendPort,
     strictPort: true,

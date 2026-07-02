@@ -83,7 +83,7 @@ func (s *Store) GetWorkflowProject(id string) (*WorkflowProject, error) {
 	err := s.db.QueryRow(`
 		SELECT id, name, payload, created_at, updated_at
 		FROM workflow_projects
-		WHERE id = ?
+		WHERE id = $1
 	`, id).Scan(&project.ID, &project.Name, &payloadStr, &project.CreatedAt, &project.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -107,7 +107,7 @@ func (s *Store) CreateWorkflowProject(name string, payload json.RawMessage) (*Wo
 
 	_, err := s.db.Exec(`
 		INSERT INTO workflow_projects (id, name, payload, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?)
+		VALUES ($1, $2, $3::jsonb, $4, $5)
 	`, project.ID, project.Name, string(project.Payload), project.CreatedAt, project.UpdatedAt)
 	if err != nil {
 		return nil, fmt.Errorf("create workflow project: %w", err)
@@ -138,8 +138,8 @@ func (s *Store) UpdateWorkflowProject(id, name string, payload json.RawMessage) 
 	now := time.Now().UnixMilli()
 	_, err = s.db.Exec(`
 		UPDATE workflow_projects
-		SET name = ?, payload = ?, updated_at = ?
-		WHERE id = ?
+		SET name = $1, payload = $2::jsonb, updated_at = $3
+		WHERE id = $4
 	`, updatedName, string(updatedPayload), now, id)
 	if err != nil {
 		return nil, fmt.Errorf("update workflow project: %w", err)
@@ -155,7 +155,7 @@ func (s *Store) UpdateWorkflowProject(id, name string, payload json.RawMessage) 
 }
 
 func (s *Store) DeleteWorkflowProject(id string) (bool, error) {
-	result, err := s.db.Exec(`DELETE FROM workflow_projects WHERE id = ?`, id)
+	result, err := s.db.Exec(`DELETE FROM workflow_projects WHERE id = $1`, id)
 	if err != nil {
 		return false, fmt.Errorf("delete workflow project: %w", err)
 	}

@@ -7,7 +7,6 @@ import (
 	"project-genesis/internal/handlers"
 	"project-genesis/internal/k8s"
 	"project-genesis/internal/store"
-	"project-genesis/web"
 	"strings"
 
 	"github.com/gorilla/mux"
@@ -32,7 +31,7 @@ func main() {
 		log.Fatalf("Failed to open workflow store: %v", err)
 	}
 	defer db.Close()
-	log.Println("Workflow project store ready (SQLite).")
+	log.Println("Workflow project store ready (PostgreSQL).")
 
 	r := mux.NewRouter()
 	k8sHandler := &handlers.K8sHandler{}
@@ -49,14 +48,7 @@ func main() {
 	api.HandleFunc("/workflows/{id}", workflowsHandler.UpdateWorkflowProject).Methods("PUT")
 	api.HandleFunc("/workflows/{id}", workflowsHandler.DeleteWorkflowProject).Methods("DELETE")
 
-	if staticHandler, ok := web.StaticHandler(); ok {
-		r.PathPrefix("/").Handler(staticHandler)
-		log.Println("Embedded UI enabled.")
-	} else {
-		log.Println("Embedded UI missing. Build frontend with `make build-frontend` or use `make dev` with Vite.")
-	}
-
 	port := serverPort()
-	log.Printf("Project:Genesis listening on http://localhost:%s", port)
+	log.Printf("Backend listening on http://localhost:%s", port)
 	log.Fatal(http.ListenAndServe(":"+port, r))
 }
