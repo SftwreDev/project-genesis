@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -18,19 +19,42 @@ type WorkflowProject struct {
 }
 
 type WorkflowProjectSummary struct {
-	ID         string `json:"id"`
-	Name       string `json:"name"`
-	NodeCount  int    `json:"nodeCount"`
-	EdgeCount  int    `json:"edgeCount"`
-	GroupCount int    `json:"groupCount"`
-	CreatedAt  int64  `json:"createdAt"`
-	UpdatedAt  int64  `json:"updatedAt"`
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	ContextName string `json:"contextName,omitempty"`
+	NodeCount   int    `json:"nodeCount"`
+	EdgeCount   int    `json:"edgeCount"`
+	GroupCount  int    `json:"groupCount"`
+	CreatedAt   int64  `json:"createdAt"`
+	UpdatedAt   int64  `json:"updatedAt"`
 }
 
 type workflowPayloadMeta struct {
 	Nodes          []json.RawMessage `json:"nodes"`
 	Edges          []json.RawMessage `json:"edges"`
 	WorkflowGroups []json.RawMessage `json:"workflowGroups"`
+	SavedContexts  []savedContextMeta `json:"savedContexts"`
+}
+
+type savedContextMeta struct {
+	Name    string `json:"name"`
+	Enabled bool   `json:"enabled"`
+}
+
+func activeContextFromPayload(payload json.RawMessage) string {
+	var meta workflowPayloadMeta
+	if err := json.Unmarshal(payload, &meta); err != nil {
+		return ""
+	}
+	for _, ctx := range meta.SavedContexts {
+		if ctx.Enabled {
+			name := strings.TrimSpace(ctx.Name)
+			if name != "" {
+				return name
+			}
+		}
+	}
+	return ""
 }
 
 func payloadCounts(payload json.RawMessage) (nodes, edges, groups int) {
@@ -62,6 +86,7 @@ func (s *Store) ListWorkflowProjects() ([]WorkflowProjectSummary, error) {
 			return nil, fmt.Errorf("scan workflow project: %w", err)
 		}
 		item.NodeCount, item.EdgeCount, item.GroupCount = payloadCounts(json.RawMessage(payloadStr))
+		item.ContextName = activeContextFromPayload(json.RawMessage(payloadStr))
 		projects = append(projects, item)
 	}
 

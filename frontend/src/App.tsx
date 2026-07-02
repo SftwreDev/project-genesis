@@ -31,6 +31,7 @@ import {
   fullCanvasSignature,
   groupSignature,
   singleNodeSignature,
+  workflowSignature,
   estimateGroupBounds,
   clampGroupFrame,
 } from './utils/workflowSignature';
@@ -905,14 +906,29 @@ function AppShell() {
   );
 
   const runWorkflow = () => {
-    const { order, error } = topologicalSort(nodes, edges);
+    const selectionIds = selectedNodeIds.filter((id) => nodes.some((node) => node.id === id));
+    const runSelection = selectionIds.length > 0;
+
+    const { order, error } = runSelection
+      ? topologicalSortSubset(nodes, edges, selectionIds)
+      : topologicalSort(nodes, edges);
     if (error) {
       appendToActiveSession('error', `❌ ${error}`);
       return;
     }
 
-    const signature = fullCanvasSignature(nodes, edges);
-    const { sessionId, shouldRun } = acquireRunSession('Full Workflow', signature);
+    const runNodes = runSelection ? nodes.filter((node) => selectionIds.includes(node.id)) : nodes;
+    const runEdges = runSelection
+      ? edges.filter(
+          (edge) => selectionIds.includes(edge.source) && selectionIds.includes(edge.target),
+        )
+      : edges;
+
+    const signature = runSelection
+      ? workflowSignature(selectionIds, edges)
+      : fullCanvasSignature(nodes, edges);
+    const sessionName = runSelection ? `Selected (${selectionIds.length})` : 'Full Workflow';
+    const { sessionId, shouldRun } = acquireRunSession(sessionName, signature);
     if (!shouldRun) return;
 
     void (async () => {
@@ -922,7 +938,7 @@ function AppShell() {
         nodeIds: order.map((node) => node.id),
       });
 
-      const scheduleGate = getEntryScheduleWait(nodes, edges);
+      const scheduleGate = getEntryScheduleWait(runNodes, runEdges);
       if (scheduleGate && scheduleGate.waitMs > 0) {
         appendToSession(
           sessionId,
@@ -941,7 +957,10 @@ function AppShell() {
         }
       }
 
-      await runNodesInSession(sessionId, order, 'Running workflow', undefined, control);
+      const label = runSelection
+        ? `Running selected workflow (${order.length} step${order.length === 1 ? '' : 's'})`
+        : 'Running workflow';
+      await runNodesInSession(sessionId, order, label, undefined, control);
     })();
   };
 
@@ -1210,9 +1229,18 @@ function AppShell() {
             <Trash2 size={16} />
             Clear Canvas
           </button>
-          <button type="button" className="btn btn--primary" onClick={runWorkflow}>
+          <button
+            type="button"
+            className="btn btn--primary"
+            onClick={runWorkflow}
+            title={
+              selectedNodeIds.length > 0
+                ? `Run ${selectedNodeIds.length} highlighted node${selectedNodeIds.length === 1 ? '' : 's'}`
+                : 'Run full canvas workflow'
+            }
+          >
             <Play size={16} />
-            Run Workflow
+            Run Workflow{selectedNodeIds.length > 0 ? ` (${selectedNodeIds.length})` : ''}
           </button>
         </div>
       </header>

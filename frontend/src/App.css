@@ -343,12 +343,27 @@
   color: #6ee7b7;
 }
 
+.workflow-projects-menu .workflow-group-menu__trigger {
+  white-space: nowrap;
+  width: auto;
+  max-width: none;
+  flex-shrink: 0;
+}
+
 .workflow-projects-menu__active {
-  max-width: 96px;
+  white-space: nowrap;
+  flex-shrink: 0;
+  font-size: 0.68rem;
+  color: #6ee7b7;
+}
+
+.workflow-projects-menu__item-context {
+  white-space: nowrap;
+  max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
   font-size: 0.68rem;
-  color: #6ee7b7;
+  color: #c4b5fd;
 }
 
 .workflow-projects-menu__panel {
@@ -833,6 +848,11 @@
     #0b1220;
 }
 
+.flow-canvas .react-flow {
+  --xy-selection-background-color: rgba(244, 114, 182, 0.12);
+  --xy-selection-border: 1px solid rgba(244, 114, 182, 0.85);
+}
+
 .workflow-group-box {
   width: 100%;
   height: 100%;
@@ -991,9 +1011,10 @@
 }
 
 .command-node--selected {
+  border-color: rgba(244, 114, 182, 0.8) !important;
   box-shadow:
-    0 0 0 1px rgba(56, 189, 248, 0.45),
-    0 14px 32px rgba(0, 0, 0, 0.28);
+    0 0 0 2px rgba(244, 114, 182, 0.35),
+    0 14px 32px rgba(244, 114, 182, 0.18);
 }
 
 .command-node--tool {

@@ -83,6 +83,7 @@ export type WorkflowProjectPayload = {
 export type WorkflowProjectSummary = {
   id: string;
   name: string;
+  contextName?: string;
   nodeCount: number;
   edgeCount: number;
   groupCount: number;

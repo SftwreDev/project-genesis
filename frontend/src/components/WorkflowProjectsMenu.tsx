@@ -137,6 +137,9 @@ export default function WorkflowProjectsMenu({
                     <span className="workflow-groups__item-meta">
                       {project.nodeCount} nodes · {project.edgeCount} edges · {project.groupCount} groups
                     </span>
+                    {project.contextName && (
+                      <span className="workflow-projects-menu__item-context">{project.contextName}</span>
+                    )}
                     <span className="workflow-projects-menu__updated">
                       Updated {formatProjectUpdatedAt(project.updatedAt)}
                     </span>
