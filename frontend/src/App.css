@@ -46,6 +46,8 @@
 .app__actions {
   display: flex;
   gap: 10px;
+  flex-wrap: nowrap;
+  min-width: 0;
   position: relative;
   z-index: 1;
 }
@@ -183,10 +185,16 @@
   color: #c4b5fd;
 }
 
+.global-context-menu .workflow-group-menu__trigger {
+  white-space: nowrap;
+  width: auto;
+  max-width: none;
+  flex-shrink: 0;
+}
+
 .global-context-menu__active {
-  max-width: 88px;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex-shrink: 0;
   font-size: 0.68rem;
   color: #c4b5fd;
 }
