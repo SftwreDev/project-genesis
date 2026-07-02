@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ReactFlowProvider,
   useEdgesState,
@@ -8,7 +8,7 @@ import {
   type Edge,
   type Node,
 } from '@xyflow/react';
-import { Layers, PanelRightClose, PanelRightOpen, Play, Save, Trash2 } from 'lucide-react';
+import { Layers, Menu, PanelLeftClose, PanelRightClose, PanelRightOpen, Play, Save, Trash2 } from 'lucide-react';
 import CommandPalette from './components/CommandPalette';
 import ExecutionTerminal from './components/ExecutionTerminal';
 import FlowCanvas from './components/FlowCanvas';
@@ -36,7 +36,12 @@ import {
   clampGroupFrame,
 } from './utils/workflowSignature';
 import { isWorkflowTool } from './data/k8sCommands';
-import { getDirectInheritedContext, getDirectInheritedNamespace, syncWorkflowInheritance } from './utils/workflowContext';
+import {
+  getDirectInheritedContext,
+  getDirectInheritedNamespace,
+  refreshNodesForGlobalContext,
+  syncWorkflowInheritance,
+} from './utils/workflowContext';
 import {
   buildWorkflowProjectPayload,
   createWorkflowProject,
@@ -84,6 +89,7 @@ function AppShell() {
   const [selectedNode, setSelectedNode] = useState<Node<CommandNodeData> | null>(null);
   const [selectedNodeIds, setSelectedNodeIds] = useState<string[]>([]);
   const [configPanelOpen, setConfigPanelOpen] = useState(true);
+  const [workloadsPanelOpen, setWorkloadsPanelOpen] = useState(true);
   const [workflowGroups, setWorkflowGroups] = useState<WorkflowGroup[]>([]);
   const [runningGroupIds, setRunningGroupIds] = useState<Set<string>>(new Set());
   const [highlightedGroupId, setHighlightedGroupId] = useState<string | null>(null);
@@ -123,69 +129,43 @@ function AppShell() {
     [activeTerminalId, appendToSession],
   );
 
+  const getNodeIdsActiveInOtherSessions = useCallback((sessionId: string) => {
+    const ids = new Set<string>();
+    for (const [otherSessionId, meta] of sessionRunMetaRef.current) {
+      if (otherSessionId === sessionId) continue;
+      if (!runControllersRef.current.has(otherSessionId)) continue;
+      meta.nodeIds.forEach((nodeId) => ids.add(nodeId));
+    }
+    return ids;
+  }, []);
+
+  const makeRunSessionName = useCallback((baseName: string, sessions: TerminalSession[]) => {
+    const matching = sessions.filter(
+      (session) => session.name === baseName || session.name.startsWith(`${baseName} (`),
+    );
+    if (matching.length === 0) return baseName;
+    return `${baseName} (${matching.length + 1})`;
+  }, []);
+
   const acquireRunSession = useCallback((name: string, signature: string) => {
     let sessionId = '';
-    let shouldRun = true;
 
     setTerminalSessions((prev) => {
-      const existing = prev.find((session) => session.workflowSignature === signature);
-
-      if (existing) {
-        sessionId = existing.id;
-        if (existing.status === 'running' || existing.status === 'paused') {
-          shouldRun = false;
-          return prev.map((session) =>
-            session.id === existing.id
-              ? {
-                  ...session,
-                  logs: [
-                    ...session.logs,
-                    makeLog(
-                      'system',
-                      existing.status === 'paused'
-                        ? 'system: Same workflow paused in this tab — resume or stop it first.'
-                        : 'system: Same workflow already running in this tab.',
-                    ),
-                  ],
-                }
-              : session,
-          );
-        }
-
-        shouldRun = true;
-        const withoutDupes = prev.filter(
-          (session) => session.workflowSignature !== signature || session.id === existing.id,
-        );
-
-        return withoutDupes.map((session) =>
-          session.id === existing.id
-            ? {
-                ...session,
-                name,
-                status: 'running',
-                logs: [makeLog('system', `system: Re-running "${name}"...`)],
-              }
-            : session,
-        );
-      }
-
+      const displayName = makeRunSessionName(name, prev);
       const session: TerminalSession = {
-        ...createTerminalSession(name, [makeLog('system', `system: Opened terminal for "${name}".`)]),
+        ...createTerminalSession(displayName, [
+          makeLog('system', `system: Opened terminal for "${displayName}".`),
+        ]),
         workflowSignature: signature,
         status: 'running',
       };
       sessionId = session.id;
-      shouldRun = true;
-
-      const withoutDupes = prev.filter((item) => item.workflowSignature !== signature);
-      return [...withoutDupes, session];
+      return [...prev, session];
     });
 
-    if (sessionId) {
-      setActiveTerminalId(sessionId);
-    }
-    return { sessionId, shouldRun };
-  }, []);
+    setActiveTerminalId(sessionId);
+    return { sessionId, shouldRun: true as const };
+  }, [makeRunSessionName]);
 
   const applyGroupsToNodes = useCallback(
     (groups: WorkflowGroup[]) => {
@@ -440,6 +420,22 @@ function AppShell() {
   }, [selectedNode, nodes, edges]);
 
   const globalContext = useMemo(() => getActiveGlobalContext(savedContexts), [savedContexts]);
+  const previousGlobalContextRef = useRef(globalContext);
+
+  useEffect(() => {
+    const previousGlobal = previousGlobalContextRef.current;
+    if (previousGlobal === globalContext) return;
+    previousGlobalContextRef.current = globalContext;
+
+    setNodes((nds) => {
+      const synced = refreshNodesForGlobalContext(nds, edges, previousGlobal, globalContext);
+      setSelectedNode((current) => {
+        if (!current) return current;
+        return synced.find((node) => node.id === current.id) ?? current;
+      });
+      return synced;
+    });
+  }, [edges, globalContext, setNodes]);
 
   const handleConnect = useCallback(
     (connection: Connection) => {
@@ -604,13 +600,26 @@ function AppShell() {
       try {
         const project = await getWorkflowProject(projectId);
         const payload = normalizeLoadedProjectPayload(project.payload);
-        setNodes(payload.nodes);
+        const loadedContexts =
+          payload.savedContexts && payload.savedContexts.length > 0
+            ? payload.savedContexts
+            : savedContexts;
+        const previousGlobal = getActiveGlobalContext(savedContexts);
+        const loadedGlobal = getActiveGlobalContext(loadedContexts);
+        const loadedNodes = refreshNodesForGlobalContext(
+          payload.nodes,
+          payload.edges,
+          previousGlobal,
+          loadedGlobal,
+        );
+        setNodes(loadedNodes);
         setEdges(payload.edges);
         setWorkflowGroups(payload.workflowGroups);
         applyGroupsToNodes(payload.workflowGroups);
         if (payload.savedContexts && payload.savedContexts.length > 0) {
           setSavedContexts(payload.savedContexts);
           persistSavedContexts(payload.savedContexts);
+          previousGlobalContextRef.current = loadedGlobal;
         }
         setActiveProjectId(project.id);
         setActiveProjectName(project.name);
@@ -622,7 +631,7 @@ function AppShell() {
         setProjectActionBusy(false);
       }
     },
-    [appendToActiveSession, applyGroupsToNodes, setEdges, setNodes],
+    [appendToActiveSession, applyGroupsToNodes, savedContexts, setEdges, setNodes],
   );
 
   const handleProjectModalConfirm = useCallback(async () => {
@@ -711,7 +720,8 @@ function AppShell() {
       sessionRunMetaRef.current.delete(sessionId);
 
       if (meta?.nodeIds.length) {
-        resetNodeStatusForIds(meta.nodeIds);
+        const busyElsewhere = getNodeIdsActiveInOtherSessions(sessionId);
+        resetNodeStatusForIds(meta.nodeIds.filter((nodeId) => !busyElsewhere.has(nodeId)));
       }
 
       setTerminalSessions((prev) =>
@@ -738,7 +748,7 @@ function AppShell() {
         persistGroupHighlight(meta.groupId);
       }
     },
-    [persistGroupHighlight, resetNodeStatusForIds],
+    [getNodeIdsActiveInOtherSessions, persistGroupHighlight, resetNodeStatusForIds],
   );
 
   const handlePauseRun = useCallback((sessionId: string) => {
@@ -818,7 +828,11 @@ function AppShell() {
         control,
       };
 
-      resetNodeStatusForIds(order.map((node) => node.id));
+      resetNodeStatusForIds(
+        order
+          .map((node) => node.id)
+          .filter((nodeId) => !getNodeIdsActiveInOtherSessions(sessionId).has(nodeId)),
+      );
       appendSessionLog('run', `▶ ${label} (${order.length} step${order.length === 1 ? '' : 's'})...`);
 
       const graph = { nodes, edges, globalContext };
@@ -852,6 +866,7 @@ function AppShell() {
       edges,
       failRunSession,
       finishRunSession,
+      getNodeIdsActiveInOtherSessions,
       nodes,
       resetNodeStatusForIds,
       stopRunSession,
@@ -929,8 +944,7 @@ function AppShell() {
       ? workflowSignature(highlightedIds, edges)
       : fullCanvasSignature(nodes, edges);
     const sessionName = runSelection ? `Selected (${highlightedIds.length})` : 'Full Workflow';
-    const { sessionId, shouldRun } = acquireRunSession(sessionName, signature);
-    if (!shouldRun) return;
+    const { sessionId } = acquireRunSession(sessionName, signature);
 
     void (async () => {
       const control = new RunController();
@@ -1085,8 +1099,10 @@ function AppShell() {
       if (!group || runningGroupIds.has(groupId)) return;
 
       const signature = groupSignature(group.id, group.nodeIds, edges);
-      const { sessionId, shouldRun } = acquireRunSession(group.name, signature);
-      if (!shouldRun) return;
+      const { sessionId } = acquireRunSession(
+        group.name,
+        signature,
+      );
 
       persistGroupHighlight(groupId);
       setRunningGroupIds((prev) => new Set(prev).add(groupId));
@@ -1126,6 +1142,15 @@ function AppShell() {
       prev.map((session) =>
         session.id === sessionId ? { ...session, logs: [] } : session,
       ),
+    );
+  }, []);
+
+  const handleRenameTerminal = useCallback((sessionId: string, name: string) => {
+    const trimmed = name.trim();
+    if (!trimmed) return;
+
+    setTerminalSessions((prev) =>
+      prev.map((session) => (session.id === sessionId ? { ...session, name: trimmed } : session)),
     );
   }, []);
 
@@ -1233,6 +1258,16 @@ function AppShell() {
           <button
             type="button"
             className="btn btn--ghost"
+            onClick={() => setWorkloadsPanelOpen((open) => !open)}
+            title={workloadsPanelOpen ? 'Hide workloads library' : 'Show workloads library'}
+            aria-pressed={workloadsPanelOpen}
+          >
+            {workloadsPanelOpen ? <PanelLeftClose size={16} /> : <Menu size={16} />}
+            Workloads
+          </button>
+          <button
+            type="button"
+            className="btn btn--ghost"
             onClick={() => setConfigPanelOpen((open) => !open)}
             title={configPanelOpen ? 'Hide config panel' : 'Show config panel'}
             aria-pressed={configPanelOpen}
@@ -1256,8 +1291,16 @@ function AppShell() {
         </div>
       </header>
 
-      <main className={`app__workspace${configPanelOpen ? '' : ' app__workspace--config-hidden'}`}>
-        <CommandPalette />
+      <main
+        className={[
+          'app__workspace',
+          !workloadsPanelOpen && 'app__workspace--workloads-hidden',
+          !configPanelOpen && 'app__workspace--config-hidden',
+        ]
+          .filter(Boolean)
+          .join(' ')}
+      >
+        {workloadsPanelOpen && <CommandPalette />}
         <FlowCanvas
           nodes={nodes}
           edges={edges}
@@ -1302,6 +1345,7 @@ function AppShell() {
         onActiveSessionChange={setActiveTerminalId}
         onCloseSession={handleCloseTerminal}
         onClearSession={handleClearTerminal}
+        onRenameSession={handleRenameTerminal}
         onPauseRun={handlePauseRun}
         onResumeRun={handleResumeRun}
         onStopRun={handleStopRun}

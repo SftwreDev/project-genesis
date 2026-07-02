@@ -84,7 +84,7 @@ export const K8S_COMMANDS: K8sCommandDef[] = [
       nsField,
       { key: 'podName', label: 'Pod Name', placeholder: 'genesis' },
       { key: 'container', label: 'Container (optional)', placeholder: 'main' },
-      { key: 'waitSeconds', label: 'Wait Timeout (seconds)', placeholder: '60', defaultValue: '60' },
+      { key: 'waitSeconds', label: 'Wait Timeout (seconds)', placeholder: '3600', defaultValue: '3600' },
       { key: 'followSeconds', label: 'Follow Duration (seconds)', placeholder: '30', defaultValue: '30' },
       { key: 'tailLines', label: 'Tail Lines', placeholder: '200', defaultValue: '200' },
     ],

@@ -44,7 +44,7 @@ func (h *K8sHandler) StreamPodLogs(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	maxWait := waitDurationFrom(params, 60)
+	maxWait := waitDurationFrom(params, 3600)
 	followSeconds := waitDurationFrom(params, 30)
 	tailLines := int64(200)
 	if raw := param(params, "tailLines"); raw != "" {

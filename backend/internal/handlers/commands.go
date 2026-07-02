@@ -339,7 +339,7 @@ func (h *K8sHandler) getPodLogs(ctx context.Context, params map[string]string) (
 	if err != nil {
 		return CommandResponse{}, err
 	}
-	maxWait := waitDurationFrom(params, 60)
+	maxWait := waitDurationFrom(params, 3600)
 	phase, _, err := h.waitForPodReady(ctx, ns, name, maxWait)
 	if err != nil {
 		return CommandResponse{Status: string(phase)}, err

@@ -205,7 +205,7 @@ function applyInheritanceToNode(
   node: Node<CommandNodeData>,
   nodes: Node<CommandNodeData>[],
   edges: Edge[],
-  globalContext = '',
+  _globalContext = '',
 ): Node<CommandNodeData> {
   let params = node.data.params;
   let context = node.data.context ?? '';
@@ -221,9 +221,8 @@ function applyInheritanceToNode(
 
   if (!parseKubeContext(context)) {
     const inheritedCtx = resolveInheritedKubeContext(node.id, nodes, edges);
-    const effectiveCtx = inheritedCtx || globalContext.trim();
-    if (effectiveCtx && context !== effectiveCtx) {
-      context = effectiveCtx;
+    if (inheritedCtx && context !== inheritedCtx) {
+      context = inheritedCtx;
       changed = true;
     }
   }
@@ -258,5 +257,81 @@ export function syncWorkflowInheritance(
     });
   }
 
+  return next;
+}
+
+/** Drop context values that were synced from a previous global default (not user/upstream overrides). */
+export function clearBakedGlobalContext(
+  nodes: Node<CommandNodeData>[],
+  edges: Edge[],
+  previousGlobal: string,
+): Node<CommandNodeData>[] {
+  const prev = previousGlobal.trim();
+  if (!prev) return nodes;
+
+  return nodes.map((node) => {
+    const own = parseKubeContext(node.data.context ?? '');
+    if (own !== prev) return node;
+
+    const inherited = resolveInheritedKubeContext(node.id, nodes, edges);
+    if (inherited) return node;
+
+    return {
+      ...node,
+      data: {
+        ...node.data,
+        context: '',
+      },
+    };
+  });
+}
+
+/** Drop redundant copies of the active global context stored on node fields. */
+export function clearRedundantGlobalContext(
+  nodes: Node<CommandNodeData>[],
+  edges: Edge[],
+  activeGlobal: string,
+): Node<CommandNodeData>[] {
+  const active = activeGlobal.trim();
+  if (!active) return nodes;
+
+  return nodes.map((node) => {
+    const own = parseKubeContext(node.data.context ?? '');
+    if (own !== active) return node;
+
+    const inherited = resolveInheritedKubeContext(node.id, nodes, edges);
+    if (inherited) return node;
+
+    return {
+      ...node,
+      data: {
+        ...node.data,
+        context: '',
+      },
+    };
+  });
+}
+
+export function refreshNodesForGlobalContext(
+  nodes: Node<CommandNodeData>[],
+  edges: Edge[],
+  previousGlobal: string,
+  activeGlobal: string,
+): Node<CommandNodeData>[] {
+  let next = clearBakedGlobalContext(nodes, edges, previousGlobal);
+  next = clearRedundantGlobalContext(next, edges, activeGlobal);
+  return syncAllWorkflowInheritance(next, edges, activeGlobal);
+}
+
+/** Re-apply inheritance for every node after global context changes. */
+export function syncAllWorkflowInheritance(
+  nodes: Node<CommandNodeData>[],
+  edges: Edge[],
+  globalContext = '',
+): Node<CommandNodeData>[] {
+  let next = nodes;
+  for (const node of nodes) {
+    next = syncWorkflowInheritance(next, edges, node.id, globalContext);
+  }
   return next;
 }

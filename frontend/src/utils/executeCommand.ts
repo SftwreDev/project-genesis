@@ -66,7 +66,7 @@ async function streamPodLogsToTerminal(
 ): Promise<{ ok: boolean; stopped?: boolean; status?: string; message?: string }> {
   appendLog(
     'system',
-    `  waiting for pod to leave Pending/Creating (up to ${params.waitSeconds || '60'}s)...`,
+    `  waiting for pod to leave Pending/Creating (up to ${params.waitSeconds || '3600'}s)...`,
   );
   appendLog(
     'system',
