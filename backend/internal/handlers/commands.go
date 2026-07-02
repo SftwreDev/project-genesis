@@ -179,6 +179,8 @@ func (h *K8sHandler) ExecuteCommand(w http.ResponseWriter, r *http.Request) {
 		resp, err = active.createNamespace(ctx, req.Params)
 	case "delete-namespace":
 		resp, err = active.deleteNamespace(ctx, req.Params)
+	case "slack-notify":
+		resp, err = executeSlackNotify(ctx, req.Params)
 	default:
 		w.WriteHeader(http.StatusBadRequest)
 		json.NewEncoder(w).Encode(CommandResponse{Error: fmt.Sprintf("Unknown command: %s", req.Command)})

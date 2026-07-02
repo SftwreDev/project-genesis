@@ -46,6 +46,7 @@ type Props = {
   isRunning: boolean;
   globalContext?: string;
   onConnect: (connection: Connection) => void;
+  onRecordHistory?: () => void;
 };
 
 function isGroupBackgroundNode(id: string) {
@@ -72,6 +73,7 @@ export default function FlowCanvas({
   isRunning,
   globalContext = '',
   onConnect: onConnectProp,
+  onRecordHistory,
 }: Props) {
   const { screenToFlowPosition } = useReactFlow();
 
@@ -179,10 +181,11 @@ export default function FlowCanvas({
         data: createCommandNodeData(command),
       };
 
+      onRecordHistory?.();
       setNodes((nds) => nds.concat(newNode));
       onNodeSelect(newNode);
     },
-    [onNodeSelect, screenToFlowPosition, setNodes],
+    [onNodeSelect, onRecordHistory, screenToFlowPosition, setNodes],
   );
 
   const handleSelectionChange: OnSelectionChangeFunc = useCallback(
@@ -208,6 +211,9 @@ export default function FlowCanvas({
         onEdgesChange={onEdgesChange}
         onConnect={onConnect}
         onSelectionChange={handleSelectionChange}
+        deleteKeyCode={['Backspace', 'Delete']}
+        edgesFocusable
+        edgesReconnectable={false}
         onNodeClick={(_, node) => {
           if (isGroupBackgroundNode(node.id)) return;
           onNodeSelect(node as Node<CommandNodeData>);
@@ -221,7 +227,11 @@ export default function FlowCanvas({
         elevateNodesOnSelect
         minZoom={0.15}
         maxZoom={2}
-        defaultEdgeOptions={{ animated: true, style: { stroke: '#569cd6' } }}
+        defaultEdgeOptions={{
+          animated: true,
+          style: { stroke: '#569cd6', strokeWidth: 2 },
+          interactionWidth: 24,
+        }}
         proOptions={{ hideAttribution: true }}
       >
         <Controls className="flow-canvas__controls" />

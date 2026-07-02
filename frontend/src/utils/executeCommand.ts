@@ -1,8 +1,9 @@
 import type { Edge, Node } from '@xyflow/react';
-import { getCommandById, isWorkflowTool } from '../data/k8sCommands';
-import type { CommandNodeData, CommandResponse, TerminalLog } from '../types';
+import { getCommandById, isIntegrationCommand, isWorkflowTool } from '../data/k8sCommands';
+import type { CommandNodeData, CommandResponse, SavedSlackProfile, TerminalLog } from '../types';
 import { formatCommandPreview } from './commandPreview';
-import { executeDelayNode, executeScheduleNode } from './workflowExecution';
+import { resolveSlackParams } from './savedSlackProfiles';
+import { executeDelayNode, executeEndNode, executeScheduleNode, executeStartNode } from './workflowExecution';
 import {
   formatKubeContextLabel,
   getDirectInheritedContext,
@@ -12,12 +13,20 @@ import {
   resolveEffectiveNamespace,
   resolveEffectiveParams,
 } from './workflowContext';
+import {
+  createStepOutputRecord,
+  getPreviousStepOutput,
+  injectTemplateVariables,
+  type StepOutputRecord,
+} from './workflowRunContext';
 import type { RunController } from './runControl';
 
 export type ExecuteGraph = {
   nodes: Node<CommandNodeData>[];
   edges: Edge[];
   globalContext?: string;
+  stepOutputs?: Map<string, StepOutputRecord>;
+  savedSlackProfiles?: SavedSlackProfile[];
 };
 
 export function formatOutput(output: unknown): string {
@@ -56,7 +65,53 @@ function toolPreview(node: Node<CommandNodeData>): string {
   if (node.data.commandId === 'workflow-schedule') {
     return `schedule ${node.data.params.scheduledAt || '<time>'}`;
   }
+  if (node.data.commandId === 'workflow-condition') {
+    return 'if upstream ok → success else → failure';
+  }
+  if (node.data.commandId === 'workflow-start') {
+    return `start ${node.data.params.segmentName || 'Main Workflow'}`;
+  }
+  if (node.data.commandId === 'workflow-end') {
+    return `end ${node.data.params.segmentName || 'Main Workflow'}`;
+  }
+  if (node.data.commandId === 'slack-notify') {
+    const channel = node.data.params.channel || '#channel';
+    return `slack notify → ${channel}`;
+  }
   return node.data.label;
+}
+
+function recordNodeOutput(
+  graph: ExecuteGraph | undefined,
+  node: Node<CommandNodeData>,
+  label: string,
+  ok: boolean,
+  message?: string,
+  output?: unknown,
+) {
+  if (!graph?.stepOutputs) return;
+  graph.stepOutputs.set(
+    node.id,
+    createStepOutputRecord(node.id, label, node.data.commandId, ok, message, output),
+  );
+}
+
+function prepareSlackParams(
+  node: Node<CommandNodeData>,
+  baseParams: Record<string, string>,
+  graph?: ExecuteGraph,
+): Record<string, string> {
+  const profiles = graph?.savedSlackProfiles ?? [];
+  const merged = resolveSlackParams(baseParams, profiles);
+  const previous =
+    graph?.stepOutputs && graph.edges
+      ? getPreviousStepOutput(node.id, graph.edges, graph.stepOutputs)
+      : null;
+
+  return {
+    ...merged,
+    message: injectTemplateVariables(merged.message ?? '', previous),
+  };
 }
 
 async function streamPodLogsToTerminal(
@@ -132,9 +187,13 @@ export async function executeCommandNode(
   const { appendLog, updateNodeStatus, control } = callbacks;
   const command = getCommandById(node.data.commandId);
   const label = command?.label ?? node.data.commandId;
-  const effectiveParams = graph
+  let effectiveParams = graph
     ? resolveEffectiveParams(node, graph.nodes, graph.edges, graph.globalContext ?? '')
     : node.data.params;
+
+  if (node.data.commandId === 'slack-notify') {
+    effectiveParams = prepareSlackParams(node, effectiveParams, graph);
+  }
 
   if (control && !(await control.checkpoint())) {
     return false;
@@ -148,9 +207,22 @@ export async function executeCommandNode(
     return executeScheduleNode(node, callbacks);
   }
 
+  if (node.data.commandId === 'workflow-condition') {
+    appendLog('error', '❌ [If/Else] Condition nodes are handled by the workflow runner.');
+    return false;
+  }
+
+  if (node.data.commandId === 'workflow-start') {
+    return executeStartNode(node, callbacks);
+  }
+
+  if (node.data.commandId === 'workflow-end') {
+    return executeEndNode(node, callbacks);
+  }
+
   updateNodeStatus(node.id, 'running');
 
-  if (graph) {
+  if (graph && !isIntegrationCommand(node.data.commandId)) {
     const inheritedCtx = getDirectInheritedContext(node.id, graph.nodes, graph.edges);
     const ownCtx = parseKubeContext(node.data.context ?? '');
     const effectiveContext = resolveEffectiveKubeContext(
@@ -200,11 +272,13 @@ export async function executeCommandNode(
       }
       if (!result.ok) {
         updateNodeStatus(node.id, 'error');
+        recordNodeOutput(graph, node, label, false, 'Could not stream pod logs');
         return false;
       }
 
       updateNodeStatus(node.id, 'success');
       appendLog('success', `✓ [${label}] ${result.message ?? 'Logs streamed'}`);
+      recordNodeOutput(graph, node, label, true, result.message ?? 'Logs streamed');
       return true;
     } catch (error) {
       if (control?.isStopped() || (error instanceof DOMException && error.name === 'AbortError')) {
@@ -213,6 +287,7 @@ export async function executeCommandNode(
       }
       updateNodeStatus(node.id, 'error');
       appendLog('error', `❌ [${label}] Could not stream pod logs.`);
+      recordNodeOutput(graph, node, label, false, 'Could not stream pod logs');
       return false;
     }
   }
@@ -234,6 +309,7 @@ export async function executeCommandNode(
       updateNodeStatus(node.id, 'error');
       appendLog('error', `❌ [${label}] ${data.error || 'Command failed'}`);
       if (data.status) appendLog('error', `  pod status: ${data.status}`);
+      recordNodeOutput(graph, node, label, false, data.error || 'Command failed', data.output);
       return false;
     }
 
@@ -241,6 +317,7 @@ export async function executeCommandNode(
     appendLog('success', `✓ [${label}] ${data.message}`);
     if (data.status) appendLog('output', `  status: ${data.status}`);
     appendCommandOutput(appendLog, data.output);
+    recordNodeOutput(graph, node, label, true, data.message, data.output);
     return true;
   } catch (error) {
     if (control?.isStopped() || (error instanceof DOMException && error.name === 'AbortError')) {
@@ -249,6 +326,7 @@ export async function executeCommandNode(
     }
     updateNodeStatus(node.id, 'error');
     appendLog('error', `❌ [${label}] Could not reach Go backend.`);
+    recordNodeOutput(graph, node, label, false, 'Could not reach Go backend');
     return false;
   }
 }

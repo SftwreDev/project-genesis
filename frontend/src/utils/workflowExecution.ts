@@ -184,6 +184,32 @@ export async function executeScheduleNode(
   return true;
 }
 
+export async function executeStartNode(
+  node: Node<CommandNodeData>,
+  { appendLog, updateNodeStatus }: ExecuteCallbacks,
+): Promise<boolean> {
+  const name = node.data.params.segmentName?.trim() || 'Main Workflow';
+
+  updateNodeStatus(node.id, 'running');
+  appendLog('run', `▶ [Start] ${name}`);
+  updateNodeStatus(node.id, 'success');
+  appendLog('success', `✓ [Start] "${name}" began`);
+  return true;
+}
+
+export async function executeEndNode(
+  node: Node<CommandNodeData>,
+  { appendLog, updateNodeStatus }: ExecuteCallbacks,
+): Promise<boolean> {
+  const name = node.data.params.segmentName?.trim() || 'Main Workflow';
+
+  updateNodeStatus(node.id, 'running');
+  appendLog('run', `⏹ [End] ${name}`);
+  updateNodeStatus(node.id, 'success');
+  appendLog('success', `✓ [End] "${name}" finished`);
+  return true;
+}
+
 export function syncNodeWorkflowGroups(
   nodes: Node<CommandNodeData>[],
   groups: WorkflowGroup[],

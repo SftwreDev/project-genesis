@@ -1,7 +1,7 @@
 import { memo, useMemo } from 'react';
 import { Handle, Position, type Edge, type Node, type NodeProps } from '@xyflow/react';
-import { Clock, Play, Timer, X } from 'lucide-react';
-import { isWorkflowTool } from '../data/k8sCommands';
+import { CircleStop, Clock, GitBranch, MessageSquare, Play, PlayCircle, Timer, X } from 'lucide-react';
+import { isIntegrationCommand, isWorkflowTool } from '../data/k8sCommands';
 import type { CommandNodeData } from '../types';
 import { formatCommandPreview, getCustomParams, splitKubectlWithContext } from '../utils/commandPreview';
 import {
@@ -14,6 +14,7 @@ const statusLabel: Record<CommandNodeData['runStatus'], string> = {
   running: 'Running',
   success: 'Done',
   error: 'Failed',
+  skipped: 'Skipped',
 };
 
 type CommandNodeProps = NodeProps & {
@@ -47,6 +48,10 @@ function CommandNode({
 }: CommandNodeProps) {
   const nodeData = data as CommandNodeData;
   const isTool = isWorkflowTool(nodeData.commandId);
+  const isIntegration = isIntegrationCommand(nodeData.commandId);
+  const isCondition = nodeData.commandId === 'workflow-condition';
+  const isStart = nodeData.commandId === 'workflow-start';
+  const isEnd = nodeData.commandId === 'workflow-end';
   const isDelayRunning =
     nodeData.commandId === 'workflow-delay' &&
     nodeData.runStatus === 'running' &&
@@ -86,11 +91,19 @@ function CommandNode({
         ? nodeData.params.scheduledAt
           ? new Date(nodeData.params.scheduledAt).toLocaleString()
           : 'Set run time'
-        : nodeData.label;
+        : nodeData.commandId === 'workflow-condition'
+          ? 'Route on upstream success or failure'
+          : nodeData.commandId === 'workflow-start'
+            ? nodeData.params.segmentName?.trim() || 'Main Workflow'
+            : nodeData.commandId === 'workflow-end'
+              ? nodeData.params.segmentName?.trim() || 'Main Workflow'
+              : nodeData.commandId === 'slack-notify'
+                ? nodeData.params.message?.trim() || nodeData.params.channel || 'Slack message'
+                : nodeData.label;
 
   return (
     <div
-      className={`command-node${isTool ? ' command-node--tool' : ''} command-node--${nodeData.runStatus}${selected ? ' command-node--selected' : ''}${nodeData.workflowGroupId ? ' command-node--grouped' : ''}`}
+      className={`command-node${isTool ? ' command-node--tool' : ''}${isIntegration ? ' command-node--integration' : ''}${isCondition ? ' command-node--condition' : ''}${isStart ? ' command-node--start' : ''}${isEnd ? ' command-node--end' : ''} command-node--${nodeData.runStatus}${selected ? ' command-node--selected' : ''}${nodeData.workflowGroupId ? ' command-node--grouped' : ''}`}
       style={{
         borderColor: nodeData.workflowGroupColor ?? nodeData.color,
         width: 'max-content',
@@ -112,7 +125,7 @@ function CommandNode({
       >
         <X size={12} />
       </button>
-      <Handle type="target" position={Position.Top} className="command-node__handle" />
+      {!isStart && <Handle type="target" position={Position.Top} className="command-node__handle" />}
       {nodeData.workflowGroupName && (
         <div
           className="command-node__group-badge"
@@ -128,7 +141,17 @@ function CommandNode({
 
       {isTool ? (
         <div className="command-node__tool">
-          {nodeData.commandId === 'workflow-delay' ? <Timer size={14} /> : <Clock size={14} />}
+          {nodeData.commandId === 'workflow-delay' ? (
+            <Timer size={14} />
+          ) : nodeData.commandId === 'workflow-condition' ? (
+            <GitBranch size={14} />
+          ) : nodeData.commandId === 'workflow-start' ? (
+            <PlayCircle size={14} />
+          ) : nodeData.commandId === 'workflow-end' ? (
+            <CircleStop size={14} />
+          ) : (
+            <Clock size={14} />
+          )}
           {isDelayRunning ? (
             <div className="command-node__delay-timer">
               <strong>{formatDelayTimer(nodeData.timerSeconds ?? 0)}</strong>
@@ -143,6 +166,11 @@ function CommandNode({
           ) : (
             <span>{toolSummary}</span>
           )}
+        </div>
+      ) : isIntegration ? (
+        <div className="command-node__integration">
+          <MessageSquare size={14} />
+          <span>{toolSummary}</span>
         </div>
       ) : (
         <>
@@ -186,7 +214,7 @@ function CommandNode({
         <button
           type="button"
           className="command-node__run"
-          disabled={isRunning || nodeData.runStatus === 'running'}
+          disabled={isRunning || nodeData.runStatus === 'running' || isStart || isEnd}
           onClick={(event) => {
             event.stopPropagation();
             onRunNode?.(id);
@@ -196,7 +224,26 @@ function CommandNode({
           Run
         </button>
       </div>
-      <Handle type="source" position={Position.Bottom} className="command-node__handle" />
+      {isCondition ? (
+        <>
+          <Handle
+            type="source"
+            position={Position.Bottom}
+            id="success"
+            className="command-node__handle command-node__handle--success"
+          />
+          <span className="command-node__branch-label command-node__branch-label--success">success</span>
+          <Handle
+            type="source"
+            position={Position.Bottom}
+            id="failure"
+            className="command-node__handle command-node__handle--failure"
+          />
+          <span className="command-node__branch-label command-node__branch-label--failure">failure</span>
+        </>
+      ) : !isEnd ? (
+        <Handle type="source" position={Position.Bottom} className="command-node__handle" />
+      ) : null}
     </div>
   );
 }

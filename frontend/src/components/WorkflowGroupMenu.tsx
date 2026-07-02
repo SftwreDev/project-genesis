@@ -49,11 +49,13 @@ export default function WorkflowGroupMenu({
     <div className="workflow-group-menu" ref={menuRef}>
       <button
         type="button"
-        className={`btn btn--ghost workflow-group-menu__trigger${open ? ' workflow-group-menu__trigger--open' : ''}`}
+        className={`btn btn--ghost btn--nav workflow-group-menu__trigger${open ? ' workflow-group-menu__trigger--open' : ''}`}
         onClick={() => setOpen((current) => !current)}
+        title="Manage workflow groups"
+        aria-expanded={open}
       >
         <FolderKanban size={16} />
-        Group
+        <span className="btn__label">Groups</span>
         {groups.length > 0 && <span className="workflow-group-menu__count">{groups.length}</span>}
       </button>
 

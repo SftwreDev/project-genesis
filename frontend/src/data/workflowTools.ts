@@ -1,6 +1,12 @@
 import type { K8sCommandDef } from '../types';
 
-export const WORKFLOW_TOOL_IDS = new Set(['workflow-delay', 'workflow-schedule']);
+export const WORKFLOW_TOOL_IDS = new Set([
+  'workflow-delay',
+  'workflow-schedule',
+  'workflow-condition',
+  'workflow-start',
+  'workflow-end',
+]);
 
 export function isWorkflowTool(commandId: string): boolean {
   return WORKFLOW_TOOL_IDS.has(commandId);
@@ -49,6 +55,53 @@ export const WORKFLOW_TOOLS: K8sCommandDef[] = [
         placeholder: '',
         defaultValue: defaultScheduleValue(),
         inputType: 'datetime-local',
+      },
+    ],
+  },
+  {
+    id: 'workflow-condition',
+    label: 'If / Else',
+    category: 'tools',
+    group: 'flow-control',
+    description: 'Route to different steps when the upstream step succeeds or fails',
+    kubectl: 'if upstream ok → success else → failure',
+    color: '#818cf8',
+    kind: 'tool',
+    fields: [],
+  },
+  {
+    id: 'workflow-start',
+    label: 'Start',
+    category: 'tools',
+    group: 'flow-control',
+    description: 'Marks where a named workflow segment begins. Only steps after Start run when Start is on the canvas.',
+    kubectl: 'start <segmentName>',
+    color: '#34d399',
+    kind: 'tool',
+    fields: [
+      {
+        key: 'segmentName',
+        label: 'Workflow Name',
+        placeholder: 'Deploy Phase',
+        defaultValue: 'Main Workflow',
+      },
+    ],
+  },
+  {
+    id: 'workflow-end',
+    label: 'End',
+    category: 'tools',
+    group: 'flow-control',
+    description: 'Marks where a named workflow segment stops. Steps after End are skipped.',
+    kubectl: 'end <segmentName>',
+    color: '#f87171',
+    kind: 'tool',
+    fields: [
+      {
+        key: 'segmentName',
+        label: 'Workflow Name',
+        placeholder: 'Deploy Complete',
+        defaultValue: 'Main Workflow',
       },
     ],
   },

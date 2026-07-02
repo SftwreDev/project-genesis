@@ -2,6 +2,7 @@ import type { Edge, Node } from '@xyflow/react';
 import type {
   CommandNodeData,
   SavedKubeContext,
+  SavedSlackProfile,
   WorkflowGroup,
   WorkflowProject,
   WorkflowProjectPayload,
@@ -13,6 +14,7 @@ export function buildWorkflowProjectPayload(
   edges: Edge[],
   workflowGroups: WorkflowGroup[],
   savedContexts: SavedKubeContext[],
+  savedSlackProfiles: SavedSlackProfile[] = [],
 ): WorkflowProjectPayload {
   return {
     nodes: nodes.map((node) => ({
@@ -27,6 +29,7 @@ export function buildWorkflowProjectPayload(
     edges,
     workflowGroups,
     savedContexts,
+    savedSlackProfiles,
   };
 }
 
@@ -44,7 +47,57 @@ export function normalizeLoadedProjectPayload(payload: WorkflowProjectPayload): 
     edges: payload.edges ?? [],
     workflowGroups: payload.workflowGroups ?? [],
     savedContexts: payload.savedContexts ?? [],
+    savedSlackProfiles: payload.savedSlackProfiles ?? [],
   };
+}
+
+function stableNodeSnapshot(node: Node<CommandNodeData>) {
+  return {
+    id: node.id,
+    type: node.type,
+    position: node.position,
+    data: {
+      commandId: node.data.commandId,
+      params: node.data.params,
+      yamlContent: node.data.yamlContent ?? '',
+      context: node.data.context ?? '',
+      workflowGroupId: node.data.workflowGroupId ?? '',
+    },
+  };
+}
+
+export function projectPayloadSignature(
+  nodes: Node<CommandNodeData>[],
+  edges: Edge[],
+  workflowGroups: WorkflowGroup[],
+  savedContexts: SavedKubeContext[],
+  savedSlackProfiles: SavedSlackProfile[] = [],
+): string {
+  const payload = buildWorkflowProjectPayload(
+    nodes,
+    edges,
+    workflowGroups,
+    savedContexts,
+    savedSlackProfiles,
+  );
+
+  const normalized = {
+    nodes: payload.nodes.map(stableNodeSnapshot).sort((a, b) => a.id.localeCompare(b.id)),
+    edges: [...payload.edges]
+      .map((edge) => ({
+        id: edge.id,
+        source: edge.source,
+        target: edge.target,
+        sourceHandle: edge.sourceHandle ?? null,
+        targetHandle: edge.targetHandle ?? null,
+      }))
+      .sort((a, b) => a.id.localeCompare(b.id)),
+    workflowGroups: [...payload.workflowGroups].sort((a, b) => a.id.localeCompare(b.id)),
+    savedContexts: [...(payload.savedContexts ?? [])].sort((a, b) => a.id.localeCompare(b.id)),
+    savedSlackProfiles: [...(payload.savedSlackProfiles ?? [])].sort((a, b) => a.id.localeCompare(b.id)),
+  };
+
+  return JSON.stringify(normalized);
 }
 
 async function readJson<T>(response: Response): Promise<T> {

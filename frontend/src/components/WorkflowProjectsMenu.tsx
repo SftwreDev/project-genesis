@@ -31,8 +31,10 @@ export default function WorkflowProjectsMenu({
   const [actionId, setActionId] = useState<string | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
 
-  const refreshProjects = useCallback(async () => {
-    setLoading(true);
+  const refreshProjects = useCallback(async (options?: { withLoading?: boolean }) => {
+    if (options?.withLoading) {
+      setLoading(true);
+    }
     setError('');
     try {
       const next = await listWorkflowProjects();
@@ -40,14 +42,20 @@ export default function WorkflowProjectsMenu({
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not load workflow projects.');
     } finally {
-      setLoading(false);
+      if (options?.withLoading) {
+        setLoading(false);
+      }
     }
   }, []);
 
   useEffect(() => {
-    if (!open) return;
     void refreshProjects();
-  }, [open, refreshKey, refreshProjects]);
+  }, [refreshKey, refreshProjects]);
+
+  useEffect(() => {
+    if (!open) return;
+    void refreshProjects({ withLoading: true });
+  }, [open, refreshProjects]);
 
   useEffect(() => {
     if (!open) return;
@@ -79,14 +87,14 @@ export default function WorkflowProjectsMenu({
     <div className="workflow-group-menu workflow-projects-menu" ref={menuRef}>
       <button
         type="button"
-        className={`btn btn--ghost workflow-group-menu__trigger${open ? ' workflow-group-menu__trigger--open' : ''}${activeProjectName ? ' workflow-projects-menu__trigger--active' : ''}`}
+        className={`btn btn--ghost btn--nav workflow-group-menu__trigger${open ? ' workflow-group-menu__trigger--open' : ''}${activeProjectName ? ' workflow-projects-menu__trigger--active' : ''}`}
         onClick={() => setOpen((current) => !current)}
         title={activeProjectName ? `Active project: ${activeProjectName}` : 'Open saved workflow projects'}
+        aria-expanded={open}
       >
         <FolderOpen size={16} />
-        Projects
+        <span className="btn__label">Projects</span>
         {projects.length > 0 && <span className="workflow-group-menu__count">{projects.length}</span>}
-        {activeProjectName && <span className="workflow-projects-menu__active">{activeProjectName}</span>}
       </button>
 
       {open && (

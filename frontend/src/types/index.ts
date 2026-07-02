@@ -1,4 +1,6 @@
-export type NodeRunStatus = 'idle' | 'running' | 'success' | 'error';
+export type NodeRunStatus = 'idle' | 'running' | 'success' | 'error' | 'skipped';
+
+export type WorkflowBranch = 'success' | 'failure';
 
 export type CommandField = {
   key: string;
@@ -17,7 +19,7 @@ export type K8sCommandDef = {
   kubectl: string;
   fields: CommandField[];
   color: string;
-  kind?: 'k8s' | 'tool';
+  kind?: 'k8s' | 'tool' | 'integration';
 };
 
 export type CommandCategory = {
@@ -73,11 +75,22 @@ export type SavedKubeContext = {
   enabled: boolean;
 };
 
+export type SavedSlackProfile = {
+  id: string;
+  name: string;
+  authMode: 'webhook' | 'bot';
+  webhookUrl: string;
+  botToken: string;
+  defaultChannel: string;
+  defaultThreadTs: string;
+};
+
 export type WorkflowProjectPayload = {
   nodes: import('@xyflow/react').Node<CommandNodeData>[];
   edges: import('@xyflow/react').Edge[];
   workflowGroups: WorkflowGroup[];
   savedContexts?: SavedKubeContext[];
+  savedSlackProfiles?: SavedSlackProfile[];
 };
 
 export type WorkflowProjectSummary = {

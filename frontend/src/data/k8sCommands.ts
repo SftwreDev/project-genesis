@@ -1,8 +1,9 @@
 import type { CommandCategory, CommandGroup, K8sCommandDef } from '../types';
 import { generateYaml } from '../utils/commandPreview';
+import { INTEGRATION_COMMANDS, isIntegrationCommand } from './integrationCommands';
 import { WORKFLOW_TOOLS, defaultScheduleValue, isWorkflowTool } from './workflowTools';
 
-export { isWorkflowTool, defaultScheduleValue };
+export { isWorkflowTool, defaultScheduleValue, isIntegrationCommand };
 
 export const COMMAND_CATEGORIES: CommandCategory[] = [
   { id: 'workloads', label: 'Workloads', color: '#2dd4bf' },
@@ -11,6 +12,7 @@ export const COMMAND_CATEGORIES: CommandCategory[] = [
   { id: 'config', label: 'Config & Storage', color: '#fbbf24' },
   { id: 'cluster', label: 'Cluster', color: '#e879f9' },
   { id: 'tools', label: 'Workflow Tools', color: '#fb923c' },
+  { id: 'integrations', label: 'Integrations', color: '#4A154B' },
 ];
 
 export const COMMAND_GROUPS: CommandGroup[] = [
@@ -23,6 +25,7 @@ export const COMMAND_GROUPS: CommandGroup[] = [
   { id: 'configmaps', label: 'ConfigMaps', categoryId: 'config', color: '#fbbf24' },
   { id: 'namespaces', label: 'Namespaces', categoryId: 'cluster', color: '#e879f9' },
   { id: 'flow-control', label: 'Flow Control', categoryId: 'tools', color: '#fb923c' },
+  { id: 'notifications', label: 'Notifications', categoryId: 'integrations', color: '#4A154B' },
 ];
 
 const nsField = {
@@ -332,6 +335,7 @@ export const K8S_COMMANDS: K8sCommandDef[] = [
     fields: [{ key: 'namespace', label: 'Namespace', placeholder: 'dev' }],
   },
   ...WORKFLOW_TOOLS,
+  ...INTEGRATION_COMMANDS,
 ];
 
 export function getCommandById(id: string): K8sCommandDef | undefined {
@@ -364,7 +368,9 @@ export function createCommandNodeData(command: K8sCommandDef) {
     context: '',
     yamlContent: isWorkflowTool(command.id)
       ? `# Workflow tool: ${command.label}`
-      : generateYaml(command.id, params),
+      : isIntegrationCommand(command.id)
+        ? `# Integration: ${command.label}`
+        : generateYaml(command.id, params),
     runStatus: 'idle' as const,
   };
 }

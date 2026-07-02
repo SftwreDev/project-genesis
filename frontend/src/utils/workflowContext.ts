@@ -1,5 +1,5 @@
 import type { Edge, Node } from '@xyflow/react';
-import { getCommandById, isWorkflowTool } from '../data/k8sCommands';
+import { getCommandById, isIntegrationCommand, isWorkflowTool } from '../data/k8sCommands';
 import type { CommandNodeData } from '../types';
 import { generateYaml } from './commandPreview';
 
@@ -197,6 +197,9 @@ export function getDirectInheritedNamespace(
 function refreshNodeYaml(node: Node<CommandNodeData>, params: Record<string, string>): string {
   if (isWorkflowTool(node.data.commandId)) {
     return `# Workflow tool: ${node.data.label}`;
+  }
+  if (isIntegrationCommand(node.data.commandId)) {
+    return `# Integration: ${node.data.label}`;
   }
   return generateYaml(node.data.commandId, params);
 }

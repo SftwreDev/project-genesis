@@ -64,17 +64,15 @@ export default function GlobalContextMenu({
     <div className="workflow-group-menu global-context-menu" ref={menuRef}>
       <button
         type="button"
-        className={`btn btn--ghost workflow-group-menu__trigger${open ? ' workflow-group-menu__trigger--open' : ''}${activeContextName ? ' global-context-menu__trigger--active' : ''}`}
+        className={`btn btn--ghost btn--nav workflow-group-menu__trigger${open ? ' workflow-group-menu__trigger--open' : ''}${activeContextName ? ' global-context-menu__trigger--active' : ''}`}
         onClick={() => setOpen((current) => !current)}
         title={activeContextName ? `Global context: ${activeContextName}` : 'Manage kube contexts'}
+        aria-expanded={open}
       >
         <Globe2 size={16} />
-        Context
+        <span className="btn__label">Context</span>
         {contexts.length > 0 && (
           <span className="workflow-group-menu__count">{contexts.length}</span>
-        )}
-        {activeContextName && (
-          <span className="global-context-menu__active">{activeContextName}</span>
         )}
       </button>
 
@@ -83,7 +81,7 @@ export default function GlobalContextMenu({
           <div className="workflow-group-menu__panel-header">
             <div>
               <h3>Kube Contexts</h3>
-              <p>Enable one to apply --context globally. Node overrides in the right panel win.</p>
+              <p>Enable one to apply --context globally. Node overrides in the inspector win.</p>
             </div>
             <button
               type="button"
