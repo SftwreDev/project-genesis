@@ -1,7 +1,45 @@
 import type { Edge, Node } from '@xyflow/react';
 import type { CommandNodeData } from '../types';
 
-export function topologicalSort(
+function compareCanvasPosition(
+  a: Node<CommandNodeData>,
+  b: Node<CommandNodeData>,
+): number {
+  if (a.position.y !== b.position.y) return a.position.y - b.position.y;
+  return a.position.x - b.position.x;
+}
+
+function componentAnchor(
+  nodes: Node<CommandNodeData>[],
+  component: Set<string>,
+): { y: number; x: number } {
+  let minY = Infinity;
+  let minX = Infinity;
+
+  for (const node of nodes) {
+    if (!component.has(node.id)) continue;
+    if (node.position.y < minY || (node.position.y === minY && node.position.x < minX)) {
+      minY = node.position.y;
+      minX = node.position.x;
+    }
+  }
+
+  return { y: minY, x: minX };
+}
+
+function sortComponentsByCanvas(
+  components: Set<string>[],
+  nodes: Node<CommandNodeData>[],
+): Set<string>[] {
+  return [...components].sort((left, right) => {
+    const anchorLeft = componentAnchor(nodes, left);
+    const anchorRight = componentAnchor(nodes, right);
+    if (anchorLeft.y !== anchorRight.y) return anchorLeft.y - anchorRight.y;
+    return anchorLeft.x - anchorRight.x;
+  });
+}
+
+function topologicalSortNodes(
   nodes: Node<CommandNodeData>[],
   edges: Edge[],
 ): { order: Node<CommandNodeData>[]; error?: string } {
@@ -9,7 +47,8 @@ export function topologicalSort(
     return { order: [], error: 'Add at least one command node to the canvas.' };
   }
 
-  const nodeIds = new Set(nodes.map((n) => n.id));
+  const nodeById = new Map(nodes.map((node) => [node.id, node]));
+  const nodeIds = new Set(nodes.map((node) => node.id));
   const inDegree = new Map<string, number>();
   const adjacency = new Map<string, string[]>();
 
@@ -24,16 +63,20 @@ export function topologicalSort(
     inDegree.set(edge.target, (inDegree.get(edge.target) ?? 0) + 1);
   }
 
-  const queue = nodes
-    .filter((n) => (inDegree.get(n.id) ?? 0) === 0)
-    .map((n) => n.id)
-    .sort();
+  const sortQueue = (ids: string[]) =>
+    ids.sort((leftId, rightId) =>
+      compareCanvasPosition(nodeById.get(leftId)!, nodeById.get(rightId)!),
+    );
+
+  const queue = sortQueue(
+    nodes.filter((node) => (inDegree.get(node.id) ?? 0) === 0).map((node) => node.id),
+  );
 
   const sorted: Node<CommandNodeData>[] = [];
 
   while (queue.length > 0) {
     const id = queue.shift()!;
-    const node = nodes.find((n) => n.id === id);
+    const node = nodeById.get(id);
     if (node) sorted.push(node);
 
     for (const next of adjacency.get(id) ?? []) {
@@ -41,7 +84,7 @@ export function topologicalSort(
       inDegree.set(next, degree);
       if (degree === 0) {
         queue.push(next);
-        queue.sort();
+        sortQueue(queue);
       }
     }
   }
@@ -51,6 +94,107 @@ export function topologicalSort(
   }
 
   return { order: sorted };
+}
+
+type NodeIdSet = Set<string>;
+
+function buildUndirectedAdjacency(nodeIds: NodeIdSet, edges: Edge[]): Map<string, Set<string>> {
+  const neighbors = new Map<string, Set<string>>();
+
+  for (const id of nodeIds) {
+    neighbors.set(id, new Set());
+  }
+
+  for (const edge of edges) {
+    if (!nodeIds.has(edge.source) || !nodeIds.has(edge.target)) continue;
+    neighbors.get(edge.source)?.add(edge.target);
+    neighbors.get(edge.target)?.add(edge.source);
+  }
+
+  return neighbors;
+}
+
+function weaklyConnectedComponents(nodeIds: NodeIdSet, edges: Edge[]): NodeIdSet[] {
+  const neighbors = buildUndirectedAdjacency(nodeIds, edges);
+  const visited = new Set<string>();
+  const components: NodeIdSet[] = [];
+
+  for (const startId of nodeIds) {
+    if (visited.has(startId)) continue;
+
+    const component = new Set<string>();
+    const queue = [startId];
+    component.add(startId);
+    visited.add(startId);
+
+    while (queue.length > 0) {
+      const current = queue.shift()!;
+      for (const next of neighbors.get(current) ?? []) {
+        if (visited.has(next)) continue;
+        visited.add(next);
+        component.add(next);
+        queue.push(next);
+      }
+    }
+
+    components.push(component);
+  }
+
+  return components;
+}
+
+/** Expand partial picks so each touched workflow island runs in full. */
+export function expandRunSelection(
+  selectedIds: string[],
+  nodes: Node<CommandNodeData>[],
+  edges: Edge[],
+): string[] {
+  const canvasIds = new Set(nodes.map((node) => node.id));
+  const selection = [...new Set(selectedIds.filter((id) => canvasIds.has(id)))];
+  if (selection.length === 0) return [];
+
+  const components = weaklyConnectedComponents(canvasIds, edges);
+  const touched = components.filter((component) =>
+    selection.some((id) => component.has(id)),
+  );
+
+  if (touched.length === 0) return selection;
+
+  if (touched.length === 1) {
+    return selection.length > 1 ? [...touched[0]] : selection;
+  }
+
+  const expanded = new Set<string>();
+  for (const component of sortComponentsByCanvas(touched, nodes)) {
+    for (const id of component) expanded.add(id);
+  }
+  return [...expanded];
+}
+
+export function topologicalSort(
+  nodes: Node<CommandNodeData>[],
+  edges: Edge[],
+): { order: Node<CommandNodeData>[]; error?: string } {
+  const nodeIds = new Set(nodes.map((node) => node.id));
+  const components = weaklyConnectedComponents(nodeIds, edges);
+
+  if (components.length <= 1) {
+    return topologicalSortNodes(nodes, edges);
+  }
+
+  const order: Node<CommandNodeData>[] = [];
+
+  for (const component of sortComponentsByCanvas(components, nodes)) {
+    const islandNodes = nodes.filter((node) => component.has(node.id));
+    const islandEdges = edges.filter(
+      (edge) => component.has(edge.source) && component.has(edge.target),
+    );
+    const result = topologicalSortNodes(islandNodes, islandEdges);
+    if (result.error) return result;
+    order.push(...result.order);
+  }
+
+  return { order };
 }
 
 export function topologicalSortSubset(

@@ -8,7 +8,7 @@ import {
   type Edge,
   type Node,
 } from '@xyflow/react';
-import { Layers, Play, Save, Trash2 } from 'lucide-react';
+import { Layers, PanelRightClose, PanelRightOpen, Play, Save, Trash2 } from 'lucide-react';
 import CommandPalette from './components/CommandPalette';
 import ExecutionTerminal from './components/ExecutionTerminal';
 import FlowCanvas from './components/FlowCanvas';
@@ -26,7 +26,7 @@ import {
   syncNodeWorkflowGroups,
   waitDuration,
 } from './utils/workflowExecution';
-import { nextWorkflowGroupColor, topologicalSort, topologicalSortSubset } from './utils/workflow';
+import { expandRunSelection, nextWorkflowGroupColor, topologicalSort, topologicalSortSubset } from './utils/workflow';
 import {
   fullCanvasSignature,
   groupSignature,
@@ -83,6 +83,7 @@ function AppShell() {
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
   const [selectedNode, setSelectedNode] = useState<Node<CommandNodeData> | null>(null);
   const [selectedNodeIds, setSelectedNodeIds] = useState<string[]>([]);
+  const [configPanelOpen, setConfigPanelOpen] = useState(true);
   const [workflowGroups, setWorkflowGroups] = useState<WorkflowGroup[]>([]);
   const [runningGroupIds, setRunningGroupIds] = useState<Set<string>>(new Set());
   const [highlightedGroupId, setHighlightedGroupId] = useState<string | null>(null);
@@ -906,28 +907,28 @@ function AppShell() {
   );
 
   const runWorkflow = () => {
-    const selectionIds = selectedNodeIds.filter((id) => nodes.some((node) => node.id === id));
-    const runSelection = selectionIds.length > 0;
+    const highlightedIds = expandRunSelection(selectedNodeIds, nodes, edges);
+    const runSelection = highlightedIds.length > 0;
 
     const { order, error } = runSelection
-      ? topologicalSortSubset(nodes, edges, selectionIds)
+      ? topologicalSortSubset(nodes, edges, highlightedIds)
       : topologicalSort(nodes, edges);
     if (error) {
       appendToActiveSession('error', `❌ ${error}`);
       return;
     }
 
-    const runNodes = runSelection ? nodes.filter((node) => selectionIds.includes(node.id)) : nodes;
+    const runNodes = runSelection ? nodes.filter((node) => highlightedIds.includes(node.id)) : nodes;
     const runEdges = runSelection
       ? edges.filter(
-          (edge) => selectionIds.includes(edge.source) && selectionIds.includes(edge.target),
+          (edge) => highlightedIds.includes(edge.source) && highlightedIds.includes(edge.target),
         )
       : edges;
 
     const signature = runSelection
-      ? workflowSignature(selectionIds, edges)
+      ? workflowSignature(highlightedIds, edges)
       : fullCanvasSignature(nodes, edges);
-    const sessionName = runSelection ? `Selected (${selectionIds.length})` : 'Full Workflow';
+    const sessionName = runSelection ? `Selected (${highlightedIds.length})` : 'Full Workflow';
     const { sessionId, shouldRun } = acquireRunSession(sessionName, signature);
     if (!shouldRun) return;
 
@@ -1231,11 +1232,21 @@ function AppShell() {
           </button>
           <button
             type="button"
+            className="btn btn--ghost"
+            onClick={() => setConfigPanelOpen((open) => !open)}
+            title={configPanelOpen ? 'Hide config panel' : 'Show config panel'}
+            aria-pressed={configPanelOpen}
+          >
+            {configPanelOpen ? <PanelRightClose size={16} /> : <PanelRightOpen size={16} />}
+            Panel
+          </button>
+          <button
+            type="button"
             className="btn btn--primary"
             onClick={runWorkflow}
             title={
               selectedNodeIds.length > 0
-                ? `Run ${selectedNodeIds.length} highlighted node${selectedNodeIds.length === 1 ? '' : 's'}`
+                ? `Run highlighted workflow steps (${selectedNodeIds.length} selected)`
                 : 'Run full canvas workflow'
             }
           >
@@ -1245,7 +1256,7 @@ function AppShell() {
         </div>
       </header>
 
-      <main className="app__workspace">
+      <main className={`app__workspace${configPanelOpen ? '' : ' app__workspace--config-hidden'}`}>
         <CommandPalette />
         <FlowCanvas
           nodes={nodes}
@@ -1268,19 +1279,21 @@ function AppShell() {
           globalContext={globalContext}
           onConnect={handleConnect}
         />
-        <NodeConfigurator
-          node={selectedNode}
-          inheritedContext={inheritedContext}
-          inheritedNamespace={inheritedNamespace}
-          globalContext={globalContext}
-          nodes={nodes}
-          edges={edges}
-          onParamChange={handleParamChange}
-          onCustomFieldAdd={handleCustomFieldAdd}
-          onCustomFieldRemove={handleCustomFieldRemove}
-          onYamlChange={handleYamlChange}
-          onContextChange={handleContextChange}
-        />
+        {configPanelOpen && (
+          <NodeConfigurator
+            node={selectedNode}
+            inheritedContext={inheritedContext}
+            inheritedNamespace={inheritedNamespace}
+            globalContext={globalContext}
+            nodes={nodes}
+            edges={edges}
+            onParamChange={handleParamChange}
+            onCustomFieldAdd={handleCustomFieldAdd}
+            onCustomFieldRemove={handleCustomFieldRemove}
+            onYamlChange={handleYamlChange}
+            onContextChange={handleContextChange}
+          />
+        )}
       </main>
 
       <ExecutionTerminal
