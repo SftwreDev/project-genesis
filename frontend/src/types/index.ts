@@ -121,6 +121,8 @@ export type TerminalSession = {
   status: 'running' | 'paused' | 'complete' | 'error' | 'stopped';
   createdAt: number;
   workflowSignature?: string;
+  saveLogsEnabled?: boolean;
+  saveLogsFile?: string;
 };
 
 export type CommandResponse = {

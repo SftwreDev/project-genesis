@@ -3,7 +3,9 @@ import {
   ChevronDown,
   ChevronUp,
   Columns2,
+  FolderOpen,
   GripHorizontal,
+  LayoutGrid,
   Maximize2,
   Minimize2,
   Pause,
@@ -14,6 +16,18 @@ import {
   X,
 } from 'lucide-react';
 import type { TerminalLog, TerminalSession } from '../types';
+import { openLogsBrowser } from '../utils/runLogs';
+import {
+  COLLAGE_PANE_MIN_HEIGHT,
+  collageVisibleRowCount,
+  applyCollageDrop,
+  collageGridSize,
+  dropZoneLabel,
+  isDropTargetActive,
+  normalizeCollageSessions,
+  resolveCollageDropTarget,
+  type CollageDropTarget,
+} from '../utils/terminalCollage';
 
 type Props = {
   sessions: TerminalSession[];
@@ -26,11 +40,9 @@ type Props = {
   onPauseRun?: (sessionId: string) => void;
   onResumeRun?: (sessionId: string) => void;
   onStopRun?: (sessionId: string) => void;
+  onToggleSaveLogs: (sessionId: string) => void;
   onHeightChange: (height: number) => void;
 };
-
-type SplitPanes = { left: string; right: string };
-type DropTarget = 'left' | 'right';
 
 const MIN_HEIGHT = 120;
 const DRAG_THRESHOLD = 6;
@@ -95,6 +107,43 @@ function highlightMessage(message: string, query: string, isActive: boolean): Re
   }
 
   return parts.length > 0 ? parts : message;
+}
+
+type SaveLogsToggleProps = {
+  session: TerminalSession;
+  onToggleSaveLogs: (sessionId: string) => void;
+  compact?: boolean;
+};
+
+function SaveLogsToggle({ session, onToggleSaveLogs, compact = false }: SaveLogsToggleProps) {
+  return (
+    <label
+      className={[
+        'terminal__save-toggle',
+        session.saveLogsEnabled && 'terminal__save-toggle--active',
+        compact && 'terminal__save-toggle--compact',
+      ]
+        .filter(Boolean)
+        .join(' ')}
+      title={
+        session.saveLogsEnabled
+          ? 'Live log capture on — writes to file until turned off or tab closes'
+          : 'Capture all terminal logs live to a file'
+      }
+      onClick={(event) => event.stopPropagation()}
+      onMouseDown={(event) => event.stopPropagation()}
+    >
+      <span className="terminal__save-toggle-label">Save</span>
+      <input
+        type="checkbox"
+        checked={Boolean(session.saveLogsEnabled)}
+        onChange={() => onToggleSaveLogs(session.id)}
+      />
+      <span className="terminal__save-toggle-track" aria-hidden="true">
+        <span className="terminal__save-toggle-thumb" />
+      </span>
+    </label>
+  );
 }
 
 type TerminalLogSearchProps = {
@@ -279,53 +328,6 @@ function TerminalLogBody({
   );
 }
 
-function pickOtherSessionId(sessions: TerminalSession[], excludeId: string, preferId?: string) {
-  if (preferId && preferId !== excludeId && sessions.some((session) => session.id === preferId)) {
-    return preferId;
-  }
-  return sessions.find((session) => session.id !== excludeId)?.id ?? null;
-}
-
-function applySplitDrop(
-  sessionId: string,
-  target: DropTarget,
-  splitPanes: SplitPanes | null,
-  anchorSessionId: string,
-  sessions: TerminalSession[],
-): SplitPanes | null {
-  if (sessions.length < 2) return null;
-
-  if (!splitPanes) {
-    const otherId = pickOtherSessionId(sessions, sessionId, anchorSessionId);
-    if (!otherId) return null;
-    return target === 'left'
-      ? { left: sessionId, right: otherId }
-      : { left: otherId, right: sessionId };
-  }
-
-  const { left, right } = splitPanes;
-  if (target === 'left') {
-    if (sessionId === right) return { left: sessionId, right: left };
-    if (sessionId === left) return splitPanes;
-    return { left: sessionId, right };
-  }
-
-  if (sessionId === left) return { left: right, right: sessionId };
-  if (sessionId === right) return splitPanes;
-  return { left, right: sessionId };
-}
-
-function resolveDropTarget(clientX: number, clientY: number, contentEl: HTMLDivElement | null): DropTarget | null {
-  if (!contentEl) return null;
-
-  const rect = contentEl.getBoundingClientRect();
-  if (clientX < rect.left || clientX > rect.right || clientY < rect.top || clientY > rect.bottom) {
-    return null;
-  }
-
-  return clientX - rect.left < rect.width / 2 ? 'left' : 'right';
-}
-
 type RenameFieldProps = {
   sessionId: string;
   name: string;
@@ -396,7 +398,7 @@ function RenameField({
 
 type TerminalPaneProps = {
   session: TerminalSession;
-  paneSide: 'left' | 'right';
+  paneIndex: number;
   isFocused: boolean;
   isDropTarget?: boolean;
   renamingSessionId: string | null;
@@ -416,11 +418,12 @@ type TerminalPaneProps = {
   onPauseRun?: (sessionId: string) => void;
   onResumeRun?: (sessionId: string) => void;
   onStopRun?: (sessionId: string) => void;
+  onToggleSaveLogs: (sessionId: string) => void;
 };
 
 function TerminalPane({
   session,
-  paneSide,
+  paneIndex,
   isFocused,
   isDropTarget = false,
   renamingSessionId,
@@ -440,6 +443,7 @@ function TerminalPane({
   onPauseRun,
   onResumeRun,
   onStopRun,
+  onToggleSaveLogs,
 }: TerminalPaneProps) {
   return (
     <div
@@ -454,7 +458,7 @@ function TerminalPane({
       onMouseDown={() => onFocus?.()}
     >
       <div className="terminal__pane-header">
-        <span className="terminal__pane-label">{paneSide === 'left' ? 'Left' : 'Right'}</span>
+        <span className="terminal__pane-label">Pane {paneIndex + 1}</span>
         <RenameField
           sessionId={session.id}
           name={session.name}
@@ -467,6 +471,7 @@ function TerminalPane({
         />
         <span className={`terminal__tab-status terminal__tab-status--${session.status}`} />
         <div className="terminal__pane-actions">
+          <SaveLogsToggle session={session} onToggleSaveLogs={onToggleSaveLogs} compact />
           {(session.status === 'running' || session.status === 'paused') && (
             <div className="terminal__controls">
               {session.status === 'running' ? (
@@ -529,9 +534,11 @@ export default function ExecutionTerminal({
   onPauseRun,
   onResumeRun,
   onStopRun,
+  onToggleSaveLogs,
   onHeightChange,
 }: Props) {
   const contentRef = useRef<HTMLDivElement>(null);
+  const panesScrollRef = useRef<HTMLDivElement>(null);
   const heightDragging = useRef(false);
   const startY = useRef(0);
   const startHeight = useRef(height);
@@ -539,29 +546,60 @@ export default function ExecutionTerminal({
   const tabDragged = useRef(false);
   const dragAnchorSessionIdRef = useRef(activeSessionId);
   const maxHeight = Math.round(window.innerHeight * 0.65);
-  const [splitPanes, setSplitPanes] = useState<SplitPanes | null>(null);
-  const [focusedPane, setFocusedPane] = useState<'left' | 'right'>('left');
+  const [collageSessions, setCollageSessions] = useState<string[] | null>(null);
+  const [focusedPaneIndex, setFocusedPaneIndex] = useState(0);
   const [tabDrag, setTabDrag] = useState<{ sessionId: string } | null>(null);
-  const [dropTarget, setDropTarget] = useState<DropTarget | null>(null);
+  const [dropTarget, setDropTarget] = useState<CollageDropTarget | null>(null);
   const [ghostPosition, setGhostPosition] = useState({ x: 0, y: 0 });
   const [maximized, setMaximized] = useState(false);
   const restoredHeightRef = useRef(height);
   const [renamingSessionId, setRenamingSessionId] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState('');
   const [searchBySession, setSearchBySession] = useState<Record<string, SessionSearch>>({});
+  const [collageRowHeight, setCollageRowHeight] = useState(COLLAGE_PANE_MIN_HEIGHT);
   const pendingTabClickRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const searchInputRefs = useRef<Map<string, HTMLInputElement>>(new Map());
 
   const activeSession =
     sessions.find((session) => session.id === activeSessionId) ?? sessions[sessions.length - 1];
 
-  const leftSession = splitPanes
-    ? sessions.find((session) => session.id === splitPanes.left) ?? null
-    : null;
-  const rightSession = splitPanes
-    ? sessions.find((session) => session.id === splitPanes.right) ?? null
-    : null;
-  const showSplit = Boolean(splitPanes && leftSession && rightSession && leftSession.id !== rightSession.id);
+  const collagePaneSessions = useMemo(() => {
+    if (!collageSessions || collageSessions.length < 2) return [];
+    return collageSessions
+      .map((sessionId) => sessions.find((session) => session.id === sessionId) ?? null)
+      .filter((session): session is TerminalSession => session !== null);
+  }, [collageSessions, sessions]);
+
+  const showCollage = collagePaneSessions.length >= 2;
+  const collageGrid = useMemo(
+    () => collageGridSize(showCollage ? collagePaneSessions.length : 2),
+    [collagePaneSessions.length, showCollage],
+  );
+  const collageVisibleRows = useMemo(
+    () => collageVisibleRowCount(showCollage ? collagePaneSessions.length : 1),
+    [collagePaneSessions.length, showCollage],
+  );
+
+  useEffect(() => {
+    if (!showCollage) return;
+
+    const el = panesScrollRef.current;
+    if (!el) return;
+
+    const updateRowHeight = () => {
+      const next = Math.max(
+        COLLAGE_PANE_MIN_HEIGHT,
+        Math.floor(el.clientHeight / collageVisibleRows),
+      );
+      setCollageRowHeight(next);
+      el.style.setProperty('--collage-row-height', `${next}px`);
+    };
+
+    updateRowHeight();
+    const observer = new ResizeObserver(updateRowHeight);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [collageVisibleRows, height, maximized, showCollage]);
 
   useEffect(() => {
     if (!maximized) return;
@@ -582,20 +620,31 @@ export default function ExecutionTerminal({
   }, [maximized, onHeightChange]);
 
   useEffect(() => {
-    if (!splitPanes) return;
+    if (!collageSessions) return;
 
     if (sessions.length < 2) {
-      setSplitPanes(null);
+      setCollageSessions(null);
       return;
     }
 
-    const leftValid = sessions.some((session) => session.id === splitPanes.left);
-    const rightValid = sessions.some((session) => session.id === splitPanes.right);
-
-    if (!leftValid || !rightValid || splitPanes.left === splitPanes.right) {
-      setSplitPanes(null);
+    const normalized = normalizeCollageSessions(collageSessions, sessions);
+    if (normalized.length < 2) {
+      setCollageSessions(null);
+      return;
     }
-  }, [sessions, splitPanes]);
+
+    if (
+      normalized.length !== collageSessions.length ||
+      normalized.some((sessionId, index) => sessionId !== collageSessions[index])
+    ) {
+      setCollageSessions(normalized);
+    }
+  }, [collageSessions, sessions]);
+
+  useEffect(() => {
+    if (!showCollage) return;
+    setFocusedPaneIndex((current) => Math.min(current, collagePaneSessions.length - 1));
+  }, [collagePaneSessions.length, showCollage]);
 
   const getSessionSearch = useCallback(
     (sessionId: string): SessionSearch => searchBySession[sessionId] ?? EMPTY_SEARCH,
@@ -670,8 +719,11 @@ export default function ExecutionTerminal({
       if (target?.closest('input, textarea, select, [contenteditable="true"]')) return;
 
       event.preventDefault();
-      if (showSplit && splitPanes) {
-        focusSessionSearch(focusedPane === 'left' ? splitPanes.left : splitPanes.right);
+      if (showCollage && collageSessions) {
+        const focusedSessionId = collageSessions[focusedPaneIndex] ?? collageSessions[0];
+        if (focusedSessionId) {
+          focusSessionSearch(focusedSessionId);
+        }
         return;
       }
       focusSessionSearch(activeSessionId);
@@ -679,7 +731,7 @@ export default function ExecutionTerminal({
 
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [activeSessionId, focusSessionSearch, focusedPane, showSplit, splitPanes]);
+  }, [activeSessionId, collageSessions, focusSessionSearch, focusedPaneIndex, showCollage]);
 
   const onMouseMove = useCallback(
     (event: MouseEvent) => {
@@ -710,23 +762,37 @@ export default function ExecutionTerminal({
       if (!tabDrag) return;
 
       setGhostPosition({ x: event.clientX, y: event.clientY });
-      setDropTarget(resolveDropTarget(event.clientX, event.clientY, contentRef.current));
+      setDropTarget(
+          resolveCollageDropTarget(
+          event.clientX,
+          event.clientY,
+          contentRef.current,
+          panesScrollRef.current,
+          collageSessions,
+          showCollage,
+          collageRowHeight,
+        ),
+      );
     },
-    [maxHeight, onHeightChange, sessions.length, tabDrag],
+    [collageRowHeight, collageSessions, maxHeight, onHeightChange, sessions.length, showCollage, tabDrag],
   );
 
   const onMouseUp = useCallback(() => {
     if (tabDrag && dropTarget) {
-      const nextSplit = applySplitDrop(
+      const nextCollage = applyCollageDrop(
         tabDrag.sessionId,
         dropTarget,
-        splitPanes,
+        collageSessions,
         dragAnchorSessionIdRef.current,
         sessions,
       );
-      if (nextSplit) {
-        setSplitPanes(nextSplit);
-        setFocusedPane(dropTarget);
+      if (nextCollage) {
+        setCollageSessions(nextCollage);
+        const nextIndex =
+          dropTarget.kind === 'pane'
+            ? Math.min(dropTarget.index, nextCollage.length - 1)
+            : nextCollage.length - 1;
+        setFocusedPaneIndex(nextIndex);
         onActiveSessionChange(tabDrag.sessionId);
       }
     }
@@ -737,7 +803,7 @@ export default function ExecutionTerminal({
     setDropTarget(null);
     document.body.style.cursor = '';
     document.body.style.userSelect = '';
-  }, [dropTarget, onActiveSessionChange, sessions, splitPanes, tabDrag]);
+  }, [collageSessions, dropTarget, onActiveSessionChange, sessions, tabDrag]);
 
   useEffect(() => {
     window.addEventListener('mousemove', onMouseMove);
@@ -776,23 +842,20 @@ export default function ExecutionTerminal({
       return;
     }
 
-    if (showSplit && splitPanes) {
-      if (sessionId === splitPanes.left) {
-        setFocusedPane('left');
-        onActiveSessionChange(sessionId);
-        return;
-      }
-      if (sessionId === splitPanes.right) {
-        setFocusedPane('right');
+    if (showCollage && collageSessions) {
+      const paneIndex = collageSessions.indexOf(sessionId);
+      if (paneIndex >= 0) {
+        setFocusedPaneIndex(paneIndex);
         onActiveSessionChange(sessionId);
         return;
       }
 
-      setSplitPanes((current) => {
+      setCollageSessions((current) => {
         if (!current) return current;
-        return focusedPane === 'left'
-          ? { ...current, left: sessionId }
-          : { ...current, right: sessionId };
+        const next = [...current];
+        const replaceIndex = Math.min(focusedPaneIndex, next.length - 1);
+        next[replaceIndex] = sessionId;
+        return normalizeCollageSessions(next, sessions);
       });
       onActiveSessionChange(sessionId);
       return;
@@ -844,8 +907,21 @@ export default function ExecutionTerminal({
     onCancelRename: cancelRename,
   };
 
-  const collapseSplit = () => {
-    setSplitPanes(null);
+  const collapseCollage = () => {
+    setCollageSessions(null);
+    setFocusedPaneIndex(0);
+  };
+
+  const openCollageGrid = () => {
+    if (sessions.length < 2) return;
+    const next = normalizeCollageSessions(
+      sessions.map((session) => session.id),
+      sessions,
+    );
+    if (next.length < 2) return;
+    setCollageSessions(next);
+    setFocusedPaneIndex(0);
+    onActiveSessionChange(next[0]);
   };
 
   const toggleMaximize = () => {
@@ -857,6 +933,38 @@ export default function ExecutionTerminal({
       restoredHeightRef.current = height;
       return true;
     });
+  };
+
+  const renderDropOverlay = (paneCount: number, isCollageView: boolean) => {
+    const slotCount = isCollageView ? paneCount + 1 : 2;
+    const grid = collageGridSize(slotCount);
+
+    return (
+      <div
+        className="terminal__drop-overlay"
+        style={{
+          ['--collage-cols' as string]: grid.cols,
+          ['--collage-rows' as string]: grid.rows,
+          ['--collage-row-height' as string]: `${collageRowHeight}px`,
+          minHeight: isCollageView ? grid.rows * collageRowHeight : undefined,
+        }}
+        aria-hidden="true"
+      >
+        {Array.from({ length: slotCount }, (_, slotIndex) => (
+          <div
+            key={`drop-${slotIndex}`}
+            className={[
+              'terminal__drop-zone',
+              isDropTargetActive(dropTarget, slotIndex, paneCount) && 'terminal__drop-zone--active',
+            ]
+              .filter(Boolean)
+              .join(' ')}
+          >
+            <span>{dropZoneLabel(slotIndex, paneCount, isCollageView)}</span>
+          </div>
+        ))}
+      </div>
+    );
   };
 
   const draggedSession = tabDrag ? sessions.find((session) => session.id === tabDrag.sessionId) : null;
@@ -879,8 +987,7 @@ export default function ExecutionTerminal({
   const activeSearch = searchPropsFor(activeSession.id);
 
   const renderTab = (session: TerminalSession) => {
-    const inLeft = showSplit && session.id === leftSession?.id;
-    const inRight = showSplit && session.id === rightSession?.id;
+    const collageIndex = showCollage ? collageSessions?.indexOf(session.id) ?? -1 : -1;
     const isActive = session.id === activeSessionId;
     const isRenaming = renamingSessionId === session.id;
 
@@ -894,8 +1001,7 @@ export default function ExecutionTerminal({
           'terminal__tab',
           isActive && 'terminal__tab--active',
           tabDrag?.sessionId === session.id && 'terminal__tab--dragging',
-          inLeft && 'terminal__tab--split-left',
-          inRight && 'terminal__tab--split-right',
+          collageIndex >= 0 && 'terminal__tab--in-collage',
         ]
           .filter(Boolean)
           .join(' ')}
@@ -907,7 +1013,7 @@ export default function ExecutionTerminal({
             handleTabClick(session.id);
           }
         }}
-        title="Double-click tab name to rename. Drag tab to pin split pane. Cmd/Ctrl+F search logs."
+        title="Double-click tab name to rename. Drag tab into grid pane. Cmd/Ctrl+F search logs."
       >
         {isRenaming ? (
           <RenameField sessionId={session.id} name={session.name} className="terminal__tab-name" {...renameFieldProps} />
@@ -919,8 +1025,7 @@ export default function ExecutionTerminal({
             {session.name}
           </span>
         )}
-        {inLeft && <span className="terminal__tab-pin">L</span>}
-        {inRight && <span className="terminal__tab-pin terminal__tab-pin--right">R</span>}
+        {collageIndex >= 0 && <span className="terminal__tab-pin">{collageIndex + 1}</span>}
         <span className={`terminal__tab-status terminal__tab-status--${session.status}`} />
         {sessions.length > 1 && (
           <button
@@ -940,7 +1045,7 @@ export default function ExecutionTerminal({
     );
   };
 
-  const renderRailItem = (session: TerminalSession, options?: { pinned?: 'left' | 'right' }) => {
+  const renderRailItem = (session: TerminalSession, options?: { collageIndex?: number }) => {
     const isActive = session.id === activeSessionId;
     const isRenaming = renamingSessionId === session.id;
 
@@ -951,8 +1056,7 @@ export default function ExecutionTerminal({
         tabIndex={0}
         className={[
           'terminal__session-rail-item',
-          options?.pinned && 'terminal__session-rail-item--pinned',
-          options?.pinned === 'right' && 'terminal__session-rail-item--pinned-right',
+          options?.collageIndex !== undefined && 'terminal__session-rail-item--pinned',
           isActive && 'terminal__session-rail-item--active',
         ]
           .filter(Boolean)
@@ -966,17 +1070,8 @@ export default function ExecutionTerminal({
           }
         }}
       >
-        {options?.pinned && (
-          <span
-            className={[
-              'terminal__session-rail-pin',
-              options.pinned === 'right' && 'terminal__session-rail-pin--right',
-            ]
-              .filter(Boolean)
-              .join(' ')}
-          >
-            {options.pinned === 'left' ? 'L' : 'R'}
-          </span>
+        {options?.collageIndex !== undefined && (
+          <span className="terminal__session-rail-pin">{options.collageIndex + 1}</span>
         )}
         {isRenaming ? (
           <RenameField
@@ -1017,7 +1112,7 @@ export default function ExecutionTerminal({
     <section
       className={[
         'terminal',
-        showSplit && 'terminal--split',
+        showCollage && 'terminal--collage',
         tabDrag && 'terminal--dragging',
         maximized && 'terminal--maximized',
       ]
@@ -1041,7 +1136,7 @@ export default function ExecutionTerminal({
           {sessions.map((session) => renderTab(session))}
         </div>
         <div className="terminal__header-actions">
-          {!showSplit && (activeSession.status === 'running' || activeSession.status === 'paused') && (
+          {!showCollage && (activeSession.status === 'running' || activeSession.status === 'paused') && (
             <div className="terminal__controls">
               {activeSession.status === 'running' ? (
                 <button
@@ -1072,17 +1167,40 @@ export default function ExecutionTerminal({
               </button>
             </div>
           )}
-          {!showSplit && (
+          {!showCollage && (
+            <SaveLogsToggle session={activeSession} onToggleSaveLogs={onToggleSaveLogs} />
+          )}
+          {!showCollage && (
             <button type="button" className="terminal__clear" onClick={() => onClearSession(activeSession.id)}>
               <Trash2 size={14} />
               Clear
             </button>
           )}
-          {showSplit && (
+          <button
+            type="button"
+            className="terminal__split-toggle"
+            onClick={openLogsBrowser}
+            title="Open saved log files"
+          >
+            <FolderOpen size={14} />
+            Logs
+          </button>
+          {sessions.length >= 2 && !showCollage && (
+            <button
+              type="button"
+              className="terminal__split-toggle"
+              onClick={openCollageGrid}
+              title="Show all terminals in a scrollable grid"
+            >
+              <LayoutGrid size={14} />
+              Grid
+            </button>
+          )}
+          {showCollage && (
             <button
               type="button"
               className="terminal__split-toggle terminal__split-toggle--active"
-              onClick={collapseSplit}
+              onClick={collapseCollage}
               title="Merge back to single terminal"
             >
               <Columns2 size={14} />
@@ -1104,56 +1222,43 @@ export default function ExecutionTerminal({
 
       <div className="terminal__body-row">
         <div className="terminal__content" ref={contentRef}>
-          {showSplit && leftSession && rightSession ? (
-            <div className="terminal__panes">
-              {tabDrag && (
-                <div className="terminal__drop-overlay" aria-hidden="true">
-                  <div
-                    className={`terminal__drop-zone terminal__drop-zone--left${dropTarget === 'left' ? ' terminal__drop-zone--active' : ''}`}
-                  >
-                    <span>Pin left pane</span>
-                  </div>
-                  <div
-                    className={`terminal__drop-zone terminal__drop-zone--right${dropTarget === 'right' ? ' terminal__drop-zone--active' : ''}`}
-                  >
-                    <span>Pin right pane</span>
-                  </div>
-                </div>
-              )}
-              <TerminalPane
-                key={leftSession.id}
-                session={leftSession}
-                paneSide="left"
-                isFocused={focusedPane === 'left'}
-                isDropTarget={Boolean(tabDrag && dropTarget === 'left')}
-                {...renameFieldProps}
-                {...searchPropsFor(leftSession.id)}
-                onFocus={() => {
-                  setFocusedPane('left');
-                  onActiveSessionChange(leftSession.id);
+          {showCollage ? (
+            <div className="terminal__panes-scroll" ref={panesScrollRef}>
+              <div
+                className="terminal__panes"
+                style={{
+                  ['--collage-cols' as string]: collageGrid.cols,
+                  ['--collage-rows' as string]: collageGrid.rows,
+                  ['--collage-row-height' as string]: `${collageRowHeight}px`,
+                  minHeight: collageGrid.rows * collageRowHeight,
                 }}
-                onClearSession={onClearSession}
-                onPauseRun={onPauseRun}
-                onResumeRun={onResumeRun}
-                onStopRun={onStopRun}
-              />
-              <TerminalPane
-                key={rightSession.id}
-                session={rightSession}
-                paneSide="right"
-                isFocused={focusedPane === 'right'}
-                isDropTarget={Boolean(tabDrag && dropTarget === 'right')}
-                {...renameFieldProps}
-                {...searchPropsFor(rightSession.id)}
-                onFocus={() => {
-                  setFocusedPane('right');
-                  onActiveSessionChange(rightSession.id);
-                }}
-                onClearSession={onClearSession}
-                onPauseRun={onPauseRun}
-                onResumeRun={onResumeRun}
-                onStopRun={onStopRun}
-              />
+              >
+                {tabDrag && renderDropOverlay(collagePaneSessions.length, true)}
+                {collagePaneSessions.map((session, index) => (
+                  <TerminalPane
+                    key={session.id}
+                    session={session}
+                    paneIndex={index}
+                    isFocused={focusedPaneIndex === index}
+                    isDropTarget={Boolean(
+                      tabDrag &&
+                        dropTarget?.kind === 'pane' &&
+                        dropTarget.index === index,
+                    )}
+                    {...renameFieldProps}
+                    {...searchPropsFor(session.id)}
+                    onFocus={() => {
+                      setFocusedPaneIndex(index);
+                      onActiveSessionChange(session.id);
+                    }}
+                    onClearSession={onClearSession}
+                    onPauseRun={onPauseRun}
+                    onResumeRun={onResumeRun}
+                    onStopRun={onStopRun}
+                    onToggleSaveLogs={onToggleSaveLogs}
+                  />
+                ))}
+              </div>
             </div>
           ) : (
             <div className="terminal__single-view terminal__body--single">
@@ -1167,38 +1272,25 @@ export default function ExecutionTerminal({
                 onClearSearch={activeSearch.onSearchClear}
                 registerSearchInput={activeSearch.registerSearchInput}
               />
-              {tabDrag && (
-                <div className="terminal__drop-overlay" aria-hidden="true">
-                  <div
-                    className={`terminal__drop-zone terminal__drop-zone--left${dropTarget === 'left' ? ' terminal__drop-zone--active' : ''}`}
-                  >
-                    <span>Pin left pane</span>
-                  </div>
-                  <div
-                    className={`terminal__drop-zone terminal__drop-zone--right${dropTarget === 'right' ? ' terminal__drop-zone--active' : ''}`}
-                  >
-                    <span>Pin right pane</span>
-                  </div>
-                </div>
-              )}
+              {tabDrag && renderDropOverlay(0, false)}
             </div>
           )}
         </div>
 
         <aside className="terminal__session-rail" aria-label="Terminal sessions">
-          {showSplit && leftSession && rightSession && (
+          {showCollage && collagePaneSessions.length > 0 && (
             <div className="terminal__session-rail-group">
-              <span className="terminal__session-rail-group-label">Split</span>
-              {renderRailItem(leftSession, { pinned: 'left' })}
-              {renderRailItem(rightSession, { pinned: 'right' })}
+              <span className="terminal__session-rail-group-label">Grid</span>
+              {collagePaneSessions.map((session, index) =>
+                renderRailItem(session, { collageIndex: index }),
+              )}
             </div>
           )}
           <div className="terminal__session-rail-list">
             {sessions
               .filter(
                 (session) =>
-                  !showSplit ||
-                  (session.id !== leftSession?.id && session.id !== rightSession?.id),
+                  !showCollage || !collageSessions?.includes(session.id),
               )
               .map((session) => renderRailItem(session))}
           </div>

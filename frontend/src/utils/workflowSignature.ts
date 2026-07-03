@@ -35,6 +35,10 @@ export function groupSignature(groupId: string, nodeIds: string[], edges: Edge[]
   return `group:${groupId}:${workflowSignature(nodeIds, edges)}`;
 }
 
+export function groupTerminalSignature(groupId: string): string {
+  return `group:${groupId}`;
+}
+
 export function estimateGroupBounds(nodes: Node<CommandNodeData>[]) {
   if (nodes.length === 0) return null;
 

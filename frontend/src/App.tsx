@@ -35,6 +35,7 @@ import type { CommandNodeData, SavedKubeContext, SavedSlackProfile, TerminalLog,
 import { generateYaml } from './utils/commandPreview';
 import { executeCommandNode } from './utils/executeCommand';
 import { RunController } from './utils/runControl';
+import { buildNewLogFilename, buildRenamedLogFilename, renameRunLog, syncRunLogs } from './utils/runLogs';
 import { parseYamlToParams } from './utils/yamlSync';
 import {
   getEntryScheduleWait,
@@ -49,7 +50,7 @@ import { applyWorkflowBounds, canvasHasStartNode, getStartScopedNodeIds, markNod
 import {
   GROUP_BACKGROUND_PREFIX,
   fullCanvasSignature,
-  groupSignature,
+  groupTerminalSignature,
   singleNodeSignature,
   workflowSignature,
   estimateGroupBounds,
@@ -145,22 +146,143 @@ function AppShell() {
   const [modalError, setModalError] = useState('');
   const runControllersRef = useRef<Map<string, RunController>>(new Map());
   const sessionRunMetaRef = useRef<Map<string, { groupId?: string; nodeIds: string[] }>>(new Map());
+  const terminalSessionsRef = useRef(terminalSessions);
+  const logSyncTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+  const logCaptureFilesRef = useRef<Map<string, string>>(new Map());
 
-  const appendToSession = useCallback((sessionId: string, level: TerminalLog['level'], message: string) => {
-    setTerminalSessions((prev) =>
-      prev.map((session) =>
-        session.id === sessionId
-          ? { ...session, logs: [...session.logs, makeLog(level, message)] }
-          : session,
-      ),
-    );
+  terminalSessionsRef.current = terminalSessions;
+
+  const resolveSessionLogFile = useCallback((session: TerminalSession): string | undefined => {
+    return session.saveLogsFile ?? logCaptureFilesRef.current.get(session.id);
   }, []);
+
+  const assignSessionLogFile = useCallback((session: TerminalSession): string => {
+    const existing = resolveSessionLogFile(session);
+    if (existing) {
+      logCaptureFilesRef.current.set(session.id, existing);
+      return existing;
+    }
+
+    const assigned = buildNewLogFilename(session.name);
+    logCaptureFilesRef.current.set(session.id, assigned);
+    return assigned;
+  }, [resolveSessionLogFile]);
+
+  const stopLogCaptureSync = useCallback((sessionId: string) => {
+    const timer = logSyncTimersRef.current.get(sessionId);
+    if (!timer) return;
+    clearTimeout(timer);
+    logSyncTimersRef.current.delete(sessionId);
+  }, []);
+
+  const flushLogCapture = useCallback(
+    async (session: TerminalSession) => {
+      if (!session.saveLogsEnabled) return;
+
+      const captureFile = assignSessionLogFile(session);
+
+      try {
+        const result = await syncRunLogs(session.name, session.logs, captureFile);
+        logCaptureFilesRef.current.set(session.id, result.file);
+        if (result.file !== session.saveLogsFile) {
+          setTerminalSessions((prev) =>
+            prev.map((item) =>
+              item.id === session.id ? { ...item, saveLogsFile: result.file } : item,
+            ),
+          );
+        }
+      } catch (error) {
+        console.error('Could not sync terminal logs:', error);
+      }
+    },
+    [assignSessionLogFile],
+  );
+
+  const scheduleLogCapture = useCallback(
+    (sessionId: string) => {
+      stopLogCaptureSync(sessionId);
+      const timer = setTimeout(() => {
+        logSyncTimersRef.current.delete(sessionId);
+        const session = terminalSessionsRef.current.find((item) => item.id === sessionId);
+        if (session?.saveLogsEnabled) {
+          void flushLogCapture(session);
+        }
+      }, 350);
+      logSyncTimersRef.current.set(sessionId, timer);
+    },
+    [flushLogCapture, stopLogCaptureSync],
+  );
+
+  const appendToSession = useCallback(
+    (sessionId: string, level: TerminalLog['level'], message: string) => {
+      setTerminalSessions((prev) => {
+        const next = prev.map((session) =>
+          session.id === sessionId
+            ? { ...session, logs: [...session.logs, makeLog(level, message)] }
+            : session,
+        );
+        const session = next.find((item) => item.id === sessionId);
+        if (session?.saveLogsEnabled) {
+          scheduleLogCapture(sessionId);
+        }
+        return next;
+      });
+    },
+    [scheduleLogCapture],
+  );
 
   const appendToActiveSession = useCallback(
     (level: TerminalLog['level'], message: string) => {
       appendToSession(activeTerminalId, level, message);
     },
     [activeTerminalId, appendToSession],
+  );
+
+  const toggleSaveLogs = useCallback(
+    (sessionId: string) => {
+      const session = terminalSessionsRef.current.find((item) => item.id === sessionId);
+      if (!session) return;
+
+      if (session.saveLogsEnabled) {
+        stopLogCaptureSync(sessionId);
+        void flushLogCapture(session);
+        setTerminalSessions((prev) =>
+          prev.map((item) =>
+            item.id === sessionId ? { ...item, saveLogsEnabled: false } : item,
+          ),
+        );
+        return;
+      }
+
+      const captureFile = assignSessionLogFile(session);
+      const enabledSession: TerminalSession = {
+        ...session,
+        saveLogsEnabled: true,
+        saveLogsFile: captureFile,
+      };
+
+      setTerminalSessions((prev) =>
+        prev.map((item) => (item.id === sessionId ? enabledSession : item)),
+      );
+      void flushLogCapture(enabledSession);
+    },
+    [assignSessionLogFile, flushLogCapture, stopLogCaptureSync],
+  );
+
+  const finalizeRunSession = useCallback(
+    (sessionId: string, status: TerminalSession['status'], options?: { logMessage?: TerminalLog }) => {
+      setTerminalSessions((prev) =>
+        prev.map((item) => {
+          if (item.id !== sessionId) return item;
+          return {
+            ...item,
+            status,
+            logs: options?.logMessage ? [...item.logs, options.logMessage] : item.logs,
+          };
+        }),
+      );
+    },
+    [],
   );
 
   const getNodeIdsActiveInOtherSessions = useCallback((sessionId: string) => {
@@ -173,22 +295,32 @@ function AppShell() {
     return ids;
   }, []);
 
-  const makeRunSessionName = useCallback((baseName: string, sessions: TerminalSession[]) => {
-    const matching = sessions.filter(
-      (session) => session.name === baseName || session.name.startsWith(`${baseName} (`),
-    );
-    if (matching.length === 0) return baseName;
-    return `${baseName} (${matching.length + 1})`;
-  }, []);
-
   const acquireRunSession = useCallback((name: string, signature: string) => {
     let sessionId = '';
+    let shouldSyncCapture = false;
 
     setTerminalSessions((prev) => {
-      const displayName = makeRunSessionName(name, prev);
+      const existing = prev.find((session) => session.workflowSignature === signature);
+      if (existing) {
+        sessionId = existing.id;
+        shouldSyncCapture = Boolean(existing.saveLogsEnabled);
+        return prev.map((session) =>
+          session.id === existing.id
+            ? {
+                ...session,
+                status: 'running',
+                logs: [
+                  ...session.logs,
+                  makeLog('system', `system: Re-running "${name}" in this terminal.`),
+                ],
+              }
+            : session,
+        );
+      }
+
       const session: TerminalSession = {
-        ...createTerminalSession(displayName, [
-          makeLog('system', `system: Opened terminal for "${displayName}".`),
+        ...createTerminalSession(name, [
+          makeLog('system', `system: Opened terminal for "${name}".`),
         ]),
         workflowSignature: signature,
         status: 'running',
@@ -198,8 +330,11 @@ function AppShell() {
     });
 
     setActiveTerminalId(sessionId);
+    if (shouldSyncCapture) {
+      scheduleLogCapture(sessionId);
+    }
     return { sessionId, shouldRun: true as const };
-  }, [makeRunSessionName]);
+  }, [scheduleLogCapture]);
 
   const applyGroupsToNodes = useCallback(
     (groups: WorkflowGroup[]) => {
@@ -915,11 +1050,7 @@ function AppShell() {
 
   const finishRunSession = useCallback(
     (sessionId: string, groupId?: string) => {
-      setTerminalSessions((prev) =>
-        prev.map((session) =>
-          session.id === sessionId ? { ...session, status: 'complete' } : session,
-        ),
-      );
+      finalizeRunSession(sessionId, 'complete');
       if (groupId) {
         setRunningGroupIds((prev) => {
           const next = new Set(prev);
@@ -929,16 +1060,14 @@ function AppShell() {
         persistGroupHighlight(groupId);
       }
     },
-    [persistGroupHighlight],
+    [finalizeRunSession, persistGroupHighlight],
   );
 
   const failRunSession = useCallback(
     (sessionId: string, groupId?: string) => {
       runControllersRef.current.delete(sessionId);
       sessionRunMetaRef.current.delete(sessionId);
-      setTerminalSessions((prev) =>
-        prev.map((session) => (session.id === sessionId ? { ...session, status: 'error' } : session)),
-      );
+      finalizeRunSession(sessionId, 'error');
       if (groupId) {
         setRunningGroupIds((prev) => {
           const next = new Set(prev);
@@ -948,7 +1077,7 @@ function AppShell() {
         persistGroupHighlight(groupId);
       }
     },
-    [persistGroupHighlight],
+    [finalizeRunSession, persistGroupHighlight],
   );
 
   const stopRunSession = useCallback(
@@ -968,16 +1097,16 @@ function AppShell() {
       }
 
       setTerminalSessions((prev) =>
-        prev.map((session) => {
-          if (session.id !== sessionId) return session;
-          const alreadyStopped = session.status === 'stopped';
+        prev.map((item) => {
+          if (item.id !== sessionId) return item;
+          const alreadyStopped = item.status === 'stopped';
           return {
-            ...session,
+            ...item,
             status: 'stopped',
             logs:
               options?.log !== false && !alreadyStopped
-                ? [...session.logs, makeLog('warn', '⏹ Workflow stopped.')]
-                : session.logs,
+                ? [...item.logs, makeLog('warn', '⏹ Workflow stopped.')]
+                : item.logs,
           };
         }),
       );
@@ -1390,7 +1519,7 @@ function AppShell() {
       const group = workflowGroups.find((item) => item.id === groupId);
       if (!group || runningGroupIds.has(groupId)) return;
 
-      const signature = groupSignature(group.id, group.nodeIds, edges);
+      const signature = groupTerminalSignature(group.id);
       const { sessionId } = acquireRunSession(
         group.name,
         signature,
@@ -1417,34 +1546,78 @@ function AppShell() {
 
   const handleCloseTerminal = useCallback(
     (sessionId: string) => {
+      const session = terminalSessionsRef.current.find((item) => item.id === sessionId);
+      if (session?.saveLogsEnabled) {
+        stopLogCaptureSync(sessionId);
+        void flushLogCapture(session);
+      }
+      logCaptureFilesRef.current.delete(sessionId);
+
       setTerminalSessions((prev) => {
         if (prev.length <= 1) return prev;
-        const next = prev.filter((session) => session.id !== sessionId);
+        const next = prev.filter((item) => item.id !== sessionId);
         if (activeTerminalId === sessionId) {
           setActiveTerminalId(next[next.length - 1].id);
         }
         return next;
       });
     },
-    [activeTerminalId],
+    [activeTerminalId, flushLogCapture, stopLogCaptureSync],
   );
 
-  const handleClearTerminal = useCallback((sessionId: string) => {
-    setTerminalSessions((prev) =>
-      prev.map((session) =>
-        session.id === sessionId ? { ...session, logs: [] } : session,
-      ),
-    );
-  }, []);
+  const handleClearTerminal = useCallback(
+    (sessionId: string) => {
+      setTerminalSessions((prev) => {
+        const next = prev.map((session) =>
+          session.id === sessionId ? { ...session, logs: [] } : session,
+        );
+        const session = next.find((item) => item.id === sessionId);
+        if (session?.saveLogsEnabled) {
+          scheduleLogCapture(sessionId);
+        }
+        return next;
+      });
+    },
+    [scheduleLogCapture],
+  );
 
-  const handleRenameTerminal = useCallback((sessionId: string, name: string) => {
-    const trimmed = name.trim();
-    if (!trimmed) return;
+  const handleRenameTerminal = useCallback(
+    (sessionId: string, name: string) => {
+      const trimmed = name.trim();
+      if (!trimmed) return;
 
-    setTerminalSessions((prev) =>
-      prev.map((session) => (session.id === sessionId ? { ...session, name: trimmed } : session)),
-    );
-  }, []);
+      const session = terminalSessionsRef.current.find((item) => item.id === sessionId);
+      const currentFile = session ? resolveSessionLogFile(session) : undefined;
+
+      setTerminalSessions((prev) =>
+        prev.map((item) => (item.id === sessionId ? { ...item, name: trimmed } : item)),
+      );
+
+      if (!session || !currentFile) return;
+
+      const renamed = buildRenamedLogFilename(trimmed, currentFile);
+      if (!renamed) return;
+
+      void renameRunLog(currentFile, renamed)
+        .then((result) => {
+          logCaptureFilesRef.current.set(sessionId, result.path);
+          setTerminalSessions((prev) =>
+            prev.map((item) =>
+              item.id === sessionId ? { ...item, saveLogsFile: result.path } : item,
+            ),
+          );
+
+          const latest = terminalSessionsRef.current.find((item) => item.id === sessionId);
+          if (latest?.saveLogsEnabled) {
+            void flushLogCapture({ ...latest, name: trimmed, saveLogsFile: result.path });
+          }
+        })
+        .catch((error) => {
+          console.error('Could not rename terminal log file:', error);
+        });
+    },
+    [flushLogCapture, resolveSessionLogFile],
+  );
 
   const hasRunningSessions = terminalSessions.some((session) => session.status === 'running');
 
@@ -1738,6 +1911,7 @@ function AppShell() {
         onPauseRun={handlePauseRun}
         onResumeRun={handleResumeRun}
         onStopRun={handleStopRun}
+        onToggleSaveLogs={toggleSaveLogs}
         height={terminalHeight}
         onHeightChange={setTerminalHeight}
       />

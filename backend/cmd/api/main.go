@@ -56,6 +56,15 @@ func main() {
 	api.HandleFunc("/workflows/{id}", workflowsHandler.UpdateWorkflowProject).Methods("PUT")
 	api.HandleFunc("/workflows/{id}", workflowsHandler.DeleteWorkflowProject).Methods("DELETE")
 
+	logsHandler := &handlers.LogsHandler{}
+	api.HandleFunc("/logs/save", logsHandler.SaveRunLogs).Methods("POST")
+	api.HandleFunc("/logs/rename", logsHandler.RenameRunLog).Methods("POST")
+	api.HandleFunc("/logs", logsHandler.ListRunLogs).Methods("GET")
+	api.HandleFunc("/logs/browser", logsHandler.BrowseRunLogs).Methods("GET")
+	api.HandleFunc("/logs/download/{file:.+}", logsHandler.DownloadRunLog).Methods("GET")
+	api.HandleFunc("/logs/view/{file:.+}", logsHandler.ViewRunLog).Methods("GET")
+	api.HandleFunc("/logs/file/{file:.+}", logsHandler.DeleteRunLog).Methods("DELETE")
+
 	// Start the HTTP server.
 	port := serverPort()
 	log.Printf("Backend listening on http://localhost:%s", port)
