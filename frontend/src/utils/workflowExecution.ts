@@ -1,6 +1,7 @@
 import type { Edge, Node } from '@xyflow/react';
 import type { CommandNodeData, TerminalLog, WorkflowGroup } from '../types';
 import type { RunController } from './runControl';
+import { resolveNextScheduleRun } from './scheduleRecurrence';
 
 export function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => {
@@ -80,15 +81,12 @@ export function getEntryScheduleWait(
   );
   if (!entrySchedule) return null;
 
-  const scheduledAt = entrySchedule.data.params.scheduledAt?.trim();
-  if (!scheduledAt) return null;
-
-  const target = new Date(scheduledAt);
-  if (Number.isNaN(target.getTime())) return null;
+  const resolution = resolveNextScheduleRun(entrySchedule.data.params);
+  if ('error' in resolution) return null;
 
   return {
-    waitMs: Math.max(0, target.getTime() - Date.now()),
-    targetLabel: target.toLocaleString(),
+    waitMs: resolution.waitMs,
+    targetLabel: resolution.summary,
     nodeId: entrySchedule.id,
   };
 }
@@ -148,30 +146,23 @@ export async function executeScheduleNode(
   node: Node<CommandNodeData>,
   { appendLog, updateNodeStatus, control }: ExecuteCallbacks,
 ): Promise<boolean> {
-  const scheduledAt = node.data.params.scheduledAt?.trim();
-  if (!scheduledAt) {
+  const resolution = resolveNextScheduleRun(node.data.params);
+  if ('error' in resolution) {
     updateNodeStatus(node.id, 'error');
-    appendLog('error', '❌ [Schedule] Run At time is required');
+    appendLog('error', `❌ [Schedule] ${resolution.error}`);
     return false;
   }
 
-  const target = new Date(scheduledAt);
-  if (Number.isNaN(target.getTime())) {
-    updateNodeStatus(node.id, 'error');
-    appendLog('error', `❌ [Schedule] Invalid date/time: "${scheduledAt}"`);
-    return false;
-  }
-
-  const waitMs = target.getTime() - Date.now();
+  const { waitMs, label, summary } = resolution;
   updateNodeStatus(node.id, 'running');
 
   if (waitMs <= 0) {
     updateNodeStatus(node.id, 'success');
-    appendLog('success', `✓ [Schedule] ${target.toLocaleString()} already passed — continuing`);
+    appendLog('success', `✓ [Schedule] ${summary} — target already reached, continuing`);
     return true;
   }
 
-  appendLog('run', `⏰ [Schedule] Waiting until ${target.toLocaleString()}...`);
+  appendLog('run', `⏰ [Schedule] ${summary}. Waiting until ${label}...`);
   const waited = await waitDuration(waitMs, appendLog, 'Schedule', { control });
 
   if (!waited) {
@@ -180,7 +171,7 @@ export async function executeScheduleNode(
   }
 
   updateNodeStatus(node.id, 'success');
-  appendLog('success', `✓ [Schedule] Target time reached — continuing`);
+  appendLog('success', `✓ [Schedule] ${summary} — target time reached, continuing`);
   return true;
 }
 

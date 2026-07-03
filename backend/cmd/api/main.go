@@ -12,6 +12,9 @@ import (
 	"github.com/gorilla/mux"
 )
 
+// serverPort returns the port the server will listen on.
+// It first checks the GENESIS_PORT environment variable,
+// and then returns the default port "8787".
 func serverPort() string {
 	if port := strings.TrimSpace(os.Getenv("GENESIS_PORT")); port != "" {
 		return port
@@ -19,6 +22,10 @@ func serverPort() string {
 	return "8787"
 }
 
+// main is the entry point for the application.
+// It first checks if the Kubernetes client is available,
+// then opens the workflow project store,
+// and then starts the HTTP server.
 func main() {
 	if _, err := k8s.GetClient(); err != nil {
 		log.Printf("Warning: Kubernetes unavailable at startup (%v). Workflow API still runs; fix kubeconfig or start cluster before kubectl commands.", err)
@@ -37,6 +44,7 @@ func main() {
 	k8sHandler := &handlers.K8sHandler{}
 	workflowsHandler := &handlers.WorkflowsHandler{Store: db}
 
+	// Define the API routes.
 	api := r.PathPrefix("/api").Subrouter()
 	api.HandleFunc("/pods", k8sHandler.GetPods).Methods("GET")
 	api.HandleFunc("/pods/create", k8sHandler.CreatePod).Methods("POST")
@@ -48,6 +56,7 @@ func main() {
 	api.HandleFunc("/workflows/{id}", workflowsHandler.UpdateWorkflowProject).Methods("PUT")
 	api.HandleFunc("/workflows/{id}", workflowsHandler.DeleteWorkflowProject).Methods("DELETE")
 
+	// Start the HTTP server.
 	port := serverPort()
 	log.Printf("Backend listening on http://localhost:%s", port)
 	log.Fatal(http.ListenAndServe(":"+port, r))

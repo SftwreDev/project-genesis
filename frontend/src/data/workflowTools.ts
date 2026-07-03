@@ -1,4 +1,5 @@
 import type { K8sCommandDef } from '../types';
+import { defaultTimeOfDay } from '../utils/scheduleRecurrence';
 
 export const WORKFLOW_TOOL_IDS = new Set([
   'workflow-delay',
@@ -18,6 +19,8 @@ export function defaultScheduleValue(): string {
   const offsetMs = date.getTimezoneOffset() * 60_000;
   return new Date(date.getTime() - offsetMs).toISOString().slice(0, 16);
 }
+
+export { defaultTimeOfDay } from '../utils/scheduleRecurrence';
 
 export const WORKFLOW_TOOLS: K8sCommandDef[] = [
   {
@@ -44,17 +47,55 @@ export const WORKFLOW_TOOLS: K8sCommandDef[] = [
     label: 'Schedule',
     category: 'tools',
     group: 'flow-control',
-    description: 'Place at workflow start to run the full flow at a date/time',
-    kubectl: 'schedule at <scheduledAt>',
+    description: 'Place at workflow start to wait until a one-time or recurring time',
+    kubectl: 'schedule <once|interval|daily|weekly|monthly>',
     color: '#f472b6',
     kind: 'tool',
     fields: [
+      {
+        key: 'scheduleType',
+        label: 'Repeat',
+        placeholder: '',
+        defaultValue: 'once',
+      },
       {
         key: 'scheduledAt',
         label: 'Run At',
         placeholder: '',
         defaultValue: defaultScheduleValue(),
         inputType: 'datetime-local',
+      },
+      {
+        key: 'intervalValue',
+        label: 'Every',
+        placeholder: '5',
+        defaultValue: '5',
+        inputType: 'number',
+      },
+      {
+        key: 'intervalUnit',
+        label: 'Interval Unit',
+        placeholder: '',
+        defaultValue: 'minutes',
+      },
+      {
+        key: 'timeOfDay',
+        label: 'Time of Day',
+        placeholder: '17:00',
+        defaultValue: defaultTimeOfDay(),
+      },
+      {
+        key: 'weeklyDay',
+        label: 'Day of Week',
+        placeholder: '',
+        defaultValue: '1',
+      },
+      {
+        key: 'monthlyDay',
+        label: 'Day of Month',
+        placeholder: '1',
+        defaultValue: '1',
+        inputType: 'number',
       },
     ],
   },

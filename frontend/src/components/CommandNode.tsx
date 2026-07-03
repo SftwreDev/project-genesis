@@ -4,6 +4,7 @@ import { CircleStop, Clock, GitBranch, MessageSquare, Play, PlayCircle, Timer, X
 import { isIntegrationCommand, isWorkflowTool } from '../data/k8sCommands';
 import type { CommandNodeData } from '../types';
 import { formatCommandPreview, getCustomParams, splitKubectlWithContext } from '../utils/commandPreview';
+import { describeSchedule } from '../utils/scheduleRecurrence';
 import {
   resolveEffectiveKubeContext,
   resolveEffectiveNamespace,
@@ -88,9 +89,7 @@ function CommandNode({
     nodeData.commandId === 'workflow-delay'
       ? `${nodeData.params.delaySeconds || '5'} second pause`
       : nodeData.commandId === 'workflow-schedule'
-        ? nodeData.params.scheduledAt
-          ? new Date(nodeData.params.scheduledAt).toLocaleString()
-          : 'Set run time'
+        ? describeSchedule(nodeData.params)
         : nodeData.commandId === 'workflow-condition'
           ? 'Route on upstream success or failure'
           : nodeData.commandId === 'workflow-start'

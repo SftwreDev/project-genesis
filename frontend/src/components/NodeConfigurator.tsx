@@ -10,6 +10,7 @@ import {
   resolveEffectiveKubeContext,
   resolveEffectiveNamespace,
 } from '../utils/workflowContext';
+import { resolveNextScheduleRun } from '../utils/scheduleRecurrence';
 import { applyYamlEditorKey } from '../utils/yamlEditor';
 
 type Tab = 'params' | 'yaml';
@@ -86,6 +87,8 @@ export default function NodeConfigurator({
   const isTool = isWorkflowTool(command.id);
   const isIntegration = isIntegrationCommand(command.id);
   const isSlack = command.id === 'slack-notify';
+  const isSchedule = command.id === 'workflow-schedule';
+  const scheduleType = node.data.params.scheduleType || 'once';
   const effectiveNamespace = resolveEffectiveNamespace(node.id, nodes, edges);
   const definedKeys = new Set(command.fields.map((f) => f.key));
   const customEntries = Object.entries(node.data.params).filter(
@@ -200,6 +203,7 @@ export default function NodeConfigurator({
           )}
 
           {command.fields.map((field) => {
+            if (isSchedule) return null;
             if (isSlack && field.key === 'slackProfileId') return null;
 
             if (isSlack && field.key === 'authMode') {
@@ -253,6 +257,112 @@ export default function NodeConfigurator({
             );
           })}
 
+          {isSchedule && (
+            <>
+              <label className="config-panel__field">
+                <span>Repeat</span>
+                <select
+                  value={scheduleType}
+                  onChange={(e) => onParamChange(node.id, 'scheduleType', e.target.value)}
+                >
+                  <option value="once">Once</option>
+                  <option value="interval">Every interval</option>
+                  <option value="daily">Daily</option>
+                  <option value="weekly">Weekly</option>
+                  <option value="monthly">Monthly</option>
+                </select>
+              </label>
+
+              {scheduleType === 'once' && (
+                <label className="config-panel__field">
+                  <span>Run At</span>
+                  <input
+                    type="datetime-local"
+                    value={node.data.params.scheduledAt ?? ''}
+                    onChange={(e) => onParamChange(node.id, 'scheduledAt', e.target.value)}
+                  />
+                </label>
+              )}
+
+              {scheduleType === 'interval' && (
+                <>
+                  <label className="config-panel__field">
+                    <span>Every</span>
+                    <input
+                      type="number"
+                      min={1}
+                      value={node.data.params.intervalValue ?? '5'}
+                      onChange={(e) => onParamChange(node.id, 'intervalValue', e.target.value)}
+                    />
+                  </label>
+                  <label className="config-panel__field">
+                    <span>Unit</span>
+                    <select
+                      value={node.data.params.intervalUnit ?? 'minutes'}
+                      onChange={(e) => onParamChange(node.id, 'intervalUnit', e.target.value)}
+                    >
+                      <option value="seconds">Seconds</option>
+                      <option value="minutes">Minutes</option>
+                      <option value="hours">Hours</option>
+                    </select>
+                  </label>
+                </>
+              )}
+
+              {(scheduleType === 'daily' || scheduleType === 'weekly' || scheduleType === 'monthly') && (
+                <label className="config-panel__field">
+                  <span>Time of Day</span>
+                  <input
+                    type="time"
+                    value={node.data.params.timeOfDay ?? '17:00'}
+                    onChange={(e) => onParamChange(node.id, 'timeOfDay', e.target.value)}
+                  />
+                </label>
+              )}
+
+              {scheduleType === 'weekly' && (
+                <label className="config-panel__field">
+                  <span>Day of Week</span>
+                  <select
+                    value={node.data.params.weeklyDay ?? '1'}
+                    onChange={(e) => onParamChange(node.id, 'weeklyDay', e.target.value)}
+                  >
+                    <option value="0">Sunday</option>
+                    <option value="1">Monday</option>
+                    <option value="2">Tuesday</option>
+                    <option value="3">Wednesday</option>
+                    <option value="4">Thursday</option>
+                    <option value="5">Friday</option>
+                    <option value="6">Saturday</option>
+                  </select>
+                </label>
+              )}
+
+              {scheduleType === 'monthly' && (
+                <label className="config-panel__field">
+                  <span>Day of Month</span>
+                  <input
+                    type="number"
+                    min={1}
+                    max={31}
+                    value={node.data.params.monthlyDay ?? '1'}
+                    onChange={(e) => onParamChange(node.id, 'monthlyDay', e.target.value)}
+                  />
+                </label>
+              )}
+
+              <p className="config-panel__hint config-panel__hint--schedule">
+                {(() => {
+                  const resolution = resolveNextScheduleRun(node.data.params);
+                  if ('error' in resolution) {
+                    return `Next run: ${resolution.error}`;
+                  }
+                  return `Next run: ${resolution.summary} (${resolution.label})`;
+                })()}
+              </p>
+            </>
+          )}
+
           {isSlack && (
             <p className="config-panel__hint">
               Variables: {'{{previous}}'}, {'{{previous_output}}'}, {'{{previous_message}}'}, {'{{previous_label}}'}, {'{{previous_status}}'}.
@@ -263,7 +373,7 @@ export default function NodeConfigurator({
           {isTool ? (
             <p className="config-panel__hint">
               {command.id === 'workflow-schedule'
-                ? 'Connect Schedule as first step (no incoming edge). Run Workflow waits until this time, then executes the flow.'
+                ? 'Connect Schedule as first step (no incoming edge). Run Workflow waits until the next matching time — once, every N seconds/minutes/hours, daily, weekly, or monthly.'
                 : command.id === 'workflow-condition'
                   ? 'Wire the step to check into the top handle. Drag from green success handle for the happy path, red failure handle for recovery/alternate path.'
                   : command.id === 'workflow-start'

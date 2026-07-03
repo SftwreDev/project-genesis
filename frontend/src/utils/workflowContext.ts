@@ -108,14 +108,17 @@ export function resolveInheritedNamespace(
   nodeId: string,
   nodes: Node<CommandNodeData>[],
   edges: Edge[],
+  visiting: Set<string> = new Set(),
 ): string {
   let inherited = '';
 
   for (const upstreamId of upstreamNodeIds(nodeId, edges)) {
+    if (visiting.has(upstreamId)) continue;
+
     const upstream = nodes.find((node) => node.id === upstreamId);
     if (!upstream || !nodeHasNamespaceField(upstream)) continue;
 
-    const effective = resolveEffectiveNamespace(upstreamId, nodes, edges);
+    const effective = resolveEffectiveNamespace(upstreamId, nodes, edges, visiting);
     if (effective) inherited = effective;
   }
 
@@ -141,14 +144,20 @@ export function resolveEffectiveNamespace(
   nodeId: string,
   nodes: Node<CommandNodeData>[],
   edges: Edge[],
+  visiting: Set<string> = new Set(),
 ): string {
+  if (visiting.has(nodeId)) return '';
+
   const node = nodes.find((item) => item.id === nodeId);
   if (!node || !nodeHasNamespaceField(node)) return '';
 
   const own = nodeOwnNamespace(node);
   if (own) return own;
 
-  return resolveInheritedNamespace(nodeId, nodes, edges);
+  visiting.add(nodeId);
+  const inherited = resolveInheritedNamespace(nodeId, nodes, edges, visiting);
+  visiting.delete(nodeId);
+  return inherited;
 }
 
 export function resolveEffectiveParams(

@@ -517,7 +517,13 @@ function AppShell() {
 
   const handleConnect = useCallback(
     (connection: Connection) => {
-      if (!connection.target) return;
+      if (!connection.source || !connection.target) return;
+
+      if (connection.source === connection.target) {
+        appendToActiveSession('warn', 'system: Cannot connect a node to itself.');
+        return;
+      }
+
       recordCanvasHistory();
 
       setEdges((eds) => {
@@ -550,7 +556,7 @@ function AppShell() {
         return nextEdges;
       });
     },
-    [globalContext, nodes, recordCanvasHistory, setEdges, setNodes],
+    [appendToActiveSession, globalContext, nodes, recordCanvasHistory, setEdges, setNodes],
   );
 
   const handleNodesChange = useCallback(

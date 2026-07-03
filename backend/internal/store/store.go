@@ -15,6 +15,12 @@ type Store struct {
 	db *sql.DB
 }
 
+// databasePath returns the path to the database file.
+// It first checks the GENESIS_DB_PATH environment variable, 
+// then the GENESIS_DATA_DIR environment variable,
+// and finally the home directory.
+// If none of these are set, it returns the default path "genesis.db".
+// The default path is "~/.genesis/genesis.db".
 func databasePath() string {
 	if path := strings.TrimSpace(os.Getenv("GENESIS_DB_PATH")); path != "" {
 		return path
@@ -31,6 +37,12 @@ func databasePath() string {
 	return filepath.Join(home, ".genesis", "genesis.db")
 }
 
+// Open opens a new database connection and performs necessary migrations.
+// It first creates the data directory if it doesn't exist,
+// then opens the database file with the appropriate connection settings.
+// If the database file doesn't exist, it creates it.
+// If the database file is corrupted, it returns an error.
+// If the database file is not a valid SQLite database, it returns an error.
 func Open() (*Store, error) {
 	path := databasePath()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {

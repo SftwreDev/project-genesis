@@ -4,6 +4,7 @@ import type { CommandNodeData, CommandResponse, SavedSlackProfile, TerminalLog }
 import { formatCommandPreview } from './commandPreview';
 import { resolveSlackParams } from './savedSlackProfiles';
 import { executeDelayNode, executeEndNode, executeScheduleNode, executeStartNode } from './workflowExecution';
+import { describeSchedule } from './scheduleRecurrence';
 import {
   formatKubeContextLabel,
   getDirectInheritedContext,
@@ -63,7 +64,7 @@ function toolPreview(node: Node<CommandNodeData>): string {
     return `wait ${node.data.params.delaySeconds || '5'}s`;
   }
   if (node.data.commandId === 'workflow-schedule') {
-    return `schedule ${node.data.params.scheduledAt || '<time>'}`;
+    return describeSchedule(node.data.params);
   }
   if (node.data.commandId === 'workflow-condition') {
     return 'if upstream ok → success else → failure';

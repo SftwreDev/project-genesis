@@ -1,4 +1,5 @@
 import { getCommandById } from '../data/k8sCommands';
+import { describeSchedule } from './scheduleRecurrence';
 
 export const RESERVED_PARAM_KEYS = new Set(['manifestYaml', 'context']);
 
@@ -368,7 +369,7 @@ ${metadataLabelsBlock(custom)}`;
 
     case 'workflow-schedule':
       return `# Workflow tool: Schedule
-# Continues when reached at: ${param(params, 'scheduledAt', '<time>')}`;
+# ${describeSchedule(params)}`;
 
     default:
       return `# No YAML preview for "${command.label}"`;
