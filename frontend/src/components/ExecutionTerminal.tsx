@@ -37,6 +37,7 @@ type Props = {
   onCloseSession: (sessionId: string) => void;
   onClearSession: (sessionId: string) => void;
   onRenameSession: (sessionId: string, name: string) => void;
+  canRenameSession?: (sessionId: string) => boolean;
   onPauseRun?: (sessionId: string) => void;
   onResumeRun?: (sessionId: string) => void;
   onStopRun?: (sessionId: string) => void;
@@ -337,6 +338,8 @@ type RenameFieldProps = {
   onRenameDraftChange: (value: string) => void;
   onCommitRename: (sessionId: string) => void;
   onCancelRename: () => void;
+  onDoubleClickRename?: (event: React.MouseEvent) => void;
+  renameTitle?: string;
 };
 
 function RenameField({
@@ -348,6 +351,8 @@ function RenameField({
   onRenameDraftChange,
   onCommitRename,
   onCancelRename,
+  onDoubleClickRename,
+  renameTitle = 'Double-click to rename',
 }: RenameFieldProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const openedAtRef = useRef(0);
@@ -393,7 +398,19 @@ function RenameField({
     );
   }
 
-  return <span className={className}>{name}</span>;
+  return (
+    <span
+      className={className}
+      title={renameTitle}
+      onDoubleClick={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        onDoubleClickRename?.(event);
+      }}
+    >
+      {name}
+    </span>
+  );
 }
 
 type TerminalPaneProps = {
@@ -419,6 +436,8 @@ type TerminalPaneProps = {
   onResumeRun?: (sessionId: string) => void;
   onStopRun?: (sessionId: string) => void;
   onToggleSaveLogs: (sessionId: string) => void;
+  onSessionRenameStart?: (sessionId: string, name: string, event: React.MouseEvent) => void;
+  sessionRenameTitle?: (sessionId: string) => string;
 };
 
 function TerminalPane({
@@ -444,6 +463,8 @@ function TerminalPane({
   onResumeRun,
   onStopRun,
   onToggleSaveLogs,
+  onSessionRenameStart,
+  sessionRenameTitle,
 }: TerminalPaneProps) {
   return (
     <div
@@ -468,6 +489,8 @@ function TerminalPane({
           onRenameDraftChange={onRenameDraftChange}
           onCommitRename={onCommitRename}
           onCancelRename={onCancelRename}
+          onDoubleClickRename={(event) => onSessionRenameStart?.(session.id, session.name, event)}
+          renameTitle={sessionRenameTitle?.(session.id)}
         />
         <span className={`terminal__tab-status terminal__tab-status--${session.status}`} />
         <div className="terminal__pane-actions">
@@ -531,6 +554,7 @@ export default function ExecutionTerminal({
   onCloseSession,
   onClearSession,
   onRenameSession,
+  canRenameSession,
   onPauseRun,
   onResumeRun,
   onStopRun,
@@ -879,10 +903,7 @@ export default function ExecutionTerminal({
   };
 
   const handleTabRename = (sessionId: string, name: string, event: React.MouseEvent) => {
-    cancelPendingTabClick();
-    event.preventDefault();
-    event.stopPropagation();
-    startRename(sessionId, name);
+    handleRenameStart(sessionId, name, event);
   };
 
   const commitRename = (sessionId: string) => {
@@ -896,7 +917,16 @@ export default function ExecutionTerminal({
 
   const cancelRename = () => {
     setRenamingSessionId(null);
-    setRenameDraft('');
+  };
+
+  const renameDisabledTitle = 'Rename disabled while node is in a workflow group';
+
+  const handleRenameStart = (sessionId: string, name: string, event: React.MouseEvent) => {
+    if (canRenameSession && !canRenameSession(sessionId)) return;
+    cancelPendingTabClick();
+    event.preventDefault();
+    event.stopPropagation();
+    startRename(sessionId, name);
   };
 
   const renameFieldProps = {
@@ -906,6 +936,11 @@ export default function ExecutionTerminal({
     onCommitRename: commitRename,
     onCancelRename: cancelRename,
   };
+
+  const sessionRenameTitle = (sessionId: string) =>
+    canRenameSession && !canRenameSession(sessionId)
+      ? renameDisabledTitle
+      : 'Double-click to rename';
 
   const collapseCollage = () => {
     setCollageSessions(null);
@@ -989,7 +1024,6 @@ export default function ExecutionTerminal({
   const renderTab = (session: TerminalSession) => {
     const collageIndex = showCollage ? collageSessions?.indexOf(session.id) ?? -1 : -1;
     const isActive = session.id === activeSessionId;
-    const isRenaming = renamingSessionId === session.id;
 
     return (
       <div
@@ -1007,24 +1041,30 @@ export default function ExecutionTerminal({
           .join(' ')}
         onMouseDown={(event) => startTabDrag(session.id, event)}
         onClick={() => scheduleTabClick(session.id)}
+        onDoubleClick={(event) => {
+          if ((event.target as HTMLElement).closest('.terminal__tab-close')) return;
+          handleTabRename(session.id, session.name, event);
+        }}
         onKeyDown={(event) => {
           if (event.key === 'Enter' || event.key === ' ') {
             event.preventDefault();
             handleTabClick(session.id);
           }
         }}
-        title="Double-click tab name to rename. Drag tab into grid pane. Cmd/Ctrl+F search logs."
+        title={
+          canRenameSession && !canRenameSession(session.id)
+            ? renameDisabledTitle
+            : 'Double-click tab name to rename. Drag tab into grid pane. Cmd/Ctrl+F search logs.'
+        }
       >
-        {isRenaming ? (
-          <RenameField sessionId={session.id} name={session.name} className="terminal__tab-name" {...renameFieldProps} />
-        ) : (
-          <span
-            className="terminal__tab-name"
-            onDoubleClick={(event) => handleTabRename(session.id, session.name, event)}
-          >
-            {session.name}
-          </span>
-        )}
+        <RenameField
+          sessionId={session.id}
+          name={session.name}
+          className="terminal__tab-name"
+          {...renameFieldProps}
+          onDoubleClickRename={(event) => handleTabRename(session.id, session.name, event)}
+          renameTitle={sessionRenameTitle(session.id)}
+        />
         {collageIndex >= 0 && <span className="terminal__tab-pin">{collageIndex + 1}</span>}
         <span className={`terminal__tab-status terminal__tab-status--${session.status}`} />
         {sessions.length > 1 && (
@@ -1047,7 +1087,6 @@ export default function ExecutionTerminal({
 
   const renderRailItem = (session: TerminalSession, options?: { collageIndex?: number }) => {
     const isActive = session.id === activeSessionId;
-    const isRenaming = renamingSessionId === session.id;
 
     return (
       <div
@@ -1063,6 +1102,10 @@ export default function ExecutionTerminal({
           .join(' ')}
         onMouseDown={(event) => startTabDrag(session.id, event)}
         onClick={() => scheduleTabClick(session.id)}
+        onDoubleClick={(event) => {
+          if ((event.target as HTMLElement).closest('.terminal__session-rail-close')) return;
+          handleTabRename(session.id, session.name, event);
+        }}
         onKeyDown={(event) => {
           if (event.key === 'Enter' || event.key === ' ') {
             event.preventDefault();
@@ -1073,21 +1116,14 @@ export default function ExecutionTerminal({
         {options?.collageIndex !== undefined && (
           <span className="terminal__session-rail-pin">{options.collageIndex + 1}</span>
         )}
-        {isRenaming ? (
-          <RenameField
-            sessionId={session.id}
-            name={session.name}
-            className="terminal__session-rail-name"
-            {...renameFieldProps}
-          />
-        ) : (
-          <span
-            className="terminal__session-rail-name"
-            onDoubleClick={(event) => handleTabRename(session.id, session.name, event)}
-          >
-            {session.name}
-          </span>
-        )}
+        <RenameField
+          sessionId={session.id}
+          name={session.name}
+          className="terminal__session-rail-name"
+          {...renameFieldProps}
+          onDoubleClickRename={(event) => handleTabRename(session.id, session.name, event)}
+          renameTitle={sessionRenameTitle(session.id)}
+        />
         <span className={`terminal__tab-status terminal__tab-status--${session.status}`} />
         {sessions.length > 1 && (
           <button
@@ -1256,6 +1292,8 @@ export default function ExecutionTerminal({
                     onResumeRun={onResumeRun}
                     onStopRun={onStopRun}
                     onToggleSaveLogs={onToggleSaveLogs}
+                    onSessionRenameStart={handleTabRename}
+                    sessionRenameTitle={sessionRenameTitle}
                   />
                 ))}
               </div>

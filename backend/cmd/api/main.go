@@ -50,6 +50,7 @@ func main() {
 	api.HandleFunc("/pods/create", k8sHandler.CreatePod).Methods("POST")
 	api.HandleFunc("/commands/execute", k8sHandler.ExecuteCommand).Methods("POST")
 	api.HandleFunc("/commands/stream-pod-logs", k8sHandler.StreamPodLogs).Methods("POST")
+	api.HandleFunc("/contexts/health", k8sHandler.ContextHealth).Methods("GET")
 	api.HandleFunc("/workflows", workflowsHandler.ListWorkflowProjects).Methods("GET")
 	api.HandleFunc("/workflows", workflowsHandler.CreateWorkflowProject).Methods("POST")
 	api.HandleFunc("/workflows/{id}", workflowsHandler.GetWorkflowProject).Methods("GET")

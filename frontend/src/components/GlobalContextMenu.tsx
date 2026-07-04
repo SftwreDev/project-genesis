@@ -1,10 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
 import { Globe2, Pencil, Plus, Trash2, X } from 'lucide-react';
 import type { SavedKubeContext } from '../types';
+import type { ContextHealthStatus } from '../utils/contextHealth';
 
 type Props = {
   contexts: SavedKubeContext[];
   activeContextName: string;
+  activeContextHealth?: ContextHealthStatus;
+  activeContextHealthMessage?: string;
   onAddContext: (name: string) => void;
   onUpdateContext: (id: string, name: string) => void;
   onDeleteContext: (id: string) => void;
@@ -14,6 +17,8 @@ type Props = {
 export default function GlobalContextMenu({
   contexts,
   activeContextName,
+  activeContextHealth = 'idle',
+  activeContextHealthMessage = '',
   onAddContext,
   onUpdateContext,
   onDeleteContext,
@@ -66,10 +71,20 @@ export default function GlobalContextMenu({
         type="button"
         className={`btn btn--ghost btn--nav workflow-group-menu__trigger${open ? ' workflow-group-menu__trigger--open' : ''}${activeContextName ? ' global-context-menu__trigger--active' : ''}`}
         onClick={() => setOpen((current) => !current)}
-        title={activeContextName ? `Global context: ${activeContextName}` : 'Manage kube contexts'}
+        title={
+          activeContextName
+            ? activeContextHealthMessage || `Global context: ${activeContextName}`
+            : 'Manage kube contexts'
+        }
         aria-expanded={open}
       >
         <Globe2 size={16} />
+        {activeContextName && activeContextHealth !== 'idle' && (
+          <span
+            className={`global-context-menu__health-dot global-context-menu__health-dot--${activeContextHealth}`}
+            aria-hidden="true"
+          />
+        )}
         <span className="btn__label">Context</span>
         {contexts.length > 0 && (
           <span className="workflow-group-menu__count">{contexts.length}</span>
@@ -148,7 +163,23 @@ export default function GlobalContextMenu({
                       </label>
                       <div className="global-context-menu__meta">
                         <code>--context {context.name}</code>
-                        {context.enabled && <span className="global-context-menu__enabled-badge">Active</span>}
+                        {context.enabled && activeContextHealth !== 'idle' && (
+                          <span
+                            className={`global-context-menu__health-badge global-context-menu__health-badge--${activeContextHealth}`}
+                            title={activeContextHealthMessage || undefined}
+                          >
+                            {activeContextHealth === 'connected'
+                              ? 'Connected'
+                              : activeContextHealth === 'expired'
+                                ? 'Expired'
+                                : activeContextHealth === 'unreachable'
+                                  ? 'Unreachable'
+                                  : 'Checking'}
+                          </span>
+                        )}
+                        {context.enabled && activeContextHealth === 'idle' && (
+                          <span className="global-context-menu__enabled-badge">Active</span>
+                        )}
                       </div>
                       <div className="workflow-groups__item-actions">
                         <button

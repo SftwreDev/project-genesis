@@ -32,6 +32,12 @@ import GlobalContextMenu from './components/GlobalContextMenu';
 import SettingsPage from './components/SettingsPage';
 import ToolbarOverflowMenu from './components/ToolbarOverflowMenu';
 import type { CommandNodeData, SavedKubeContext, SavedSlackProfile, TerminalLog, TerminalSession, WorkflowGroup, WorkflowGroupFrame } from './types';
+import {
+  checkContextHealth,
+  contextHealthPollIntervalMs,
+  type ContextHealthStatus,
+  validateWorkflowContexts,
+} from './utils/contextHealth';
 import { generateYaml } from './utils/commandPreview';
 import { executeCommandNode } from './utils/executeCommand';
 import { RunController } from './utils/runControl';
@@ -50,12 +56,15 @@ import { applyWorkflowBounds, canvasHasStartNode, getStartScopedNodeIds, markNod
 import {
   GROUP_BACKGROUND_PREFIX,
   fullCanvasSignature,
+  getNodeCardTitle,
   groupTerminalSignature,
+  parseSingleNodeSignature,
   singleNodeSignature,
   workflowSignature,
   estimateGroupBounds,
   clampGroupFrame,
 } from './utils/workflowSignature';
+import { reconnectEdgesAfterDelete } from './utils/workflowConnections';
 import { isIntegrationCommand, isWorkflowTool } from './data/k8sCommands';
 import {
   getDirectInheritedContext,
@@ -634,6 +643,36 @@ function AppShell() {
 
   const globalContext = useMemo(() => getActiveGlobalContext(savedContexts), [savedContexts]);
   const previousGlobalContextRef = useRef(globalContext);
+  const [activeContextHealth, setActiveContextHealth] = useState<ContextHealthStatus>('idle');
+  const [activeContextHealthMessage, setActiveContextHealthMessage] = useState('');
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const refreshActiveContextHealth = async () => {
+      if (!globalContext.trim()) {
+        setActiveContextHealth('idle');
+        setActiveContextHealthMessage('');
+        return;
+      }
+
+      setActiveContextHealth('unknown');
+      const result = await checkContextHealth(globalContext);
+      if (cancelled) return;
+      setActiveContextHealth(result.status);
+      setActiveContextHealthMessage(result.message);
+    };
+
+    void refreshActiveContextHealth();
+    const intervalId = window.setInterval(() => {
+      void refreshActiveContextHealth();
+    }, contextHealthPollIntervalMs());
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+    };
+  }, [globalContext]);
 
   useEffect(() => {
     const previousGlobal = previousGlobalContextRef.current;
@@ -658,6 +697,15 @@ function AppShell() {
         appendToActiveSession('warn', 'system: Cannot connect a node to itself.');
         return;
       }
+
+      const duplicate = edges.some(
+        (edge) =>
+          edge.source === connection.source &&
+          edge.target === connection.target &&
+          (edge.sourceHandle ?? null) === (connection.sourceHandle ?? null) &&
+          (edge.targetHandle ?? null) === (connection.targetHandle ?? null),
+      );
+      if (duplicate) return;
 
       recordCanvasHistory();
 
@@ -691,7 +739,28 @@ function AppShell() {
         return nextEdges;
       });
     },
-    [appendToActiveSession, globalContext, nodes, recordCanvasHistory, setEdges, setNodes],
+    [appendToActiveSession, edges, globalContext, nodes, recordCanvasHistory, setEdges, setNodes],
+  );
+
+  const handleNodesDelete = useCallback(
+    (deleted: Node<CommandNodeData>[]) => {
+      if (deleted.length === 0) return;
+
+      recordCanvasHistory();
+      setEdges((currentEdges) => {
+        const nextEdges = reconnectEdgesAfterDelete(deleted, nodes, currentEdges);
+        setNodes((currentNodes) => {
+          let nextNodes = currentNodes;
+          for (const edge of nextEdges) {
+            if (currentEdges.some((item) => item.id === edge.id)) continue;
+            nextNodes = syncWorkflowInheritance(nextNodes, nextEdges, edge.target, globalContext);
+          }
+          return nextNodes;
+        });
+        return nextEdges;
+      });
+    },
+    [globalContext, nodes, recordCanvasHistory, setEdges, setNodes],
   );
 
   const handleNodesChange = useCallback(
@@ -1180,6 +1249,13 @@ function AppShell() {
         return;
       }
 
+      const contextCheck = await validateWorkflowContexts(order, nodes, edges, globalContext);
+      if (!contextCheck.ok) {
+        appendToSession(sessionId, 'error', contextCheck.message);
+        failRunSession(sessionId, groupId);
+        return;
+      }
+
       const control = existingControl ?? new RunController();
       if (!existingControl) {
         runControllersRef.current.set(sessionId, control);
@@ -1401,14 +1477,89 @@ function AppShell() {
     (nodeId: string) => {
       const node = nodes.find((item) => item.id === nodeId);
       if (!node || node.data.runStatus === 'running') return;
+      const cardTitle = getNodeCardTitle(node);
       const { sessionId, shouldRun } = acquireRunSession(
-        node.data.label,
+        cardTitle,
         singleNodeSignature(node),
       );
       if (!shouldRun) return;
-      void runNodesInSession(sessionId, [node], `Running ${node.data.label}`);
+      void runNodesInSession(sessionId, [node], `Running ${cardTitle}`);
     },
     [acquireRunSession, nodes, runNodesInSession],
+  );
+
+  const syncSessionLogFilename = useCallback(
+    (sessionId: string, name: string) => {
+      const session = terminalSessionsRef.current.find((item) => item.id === sessionId);
+      const currentFile = session ? resolveSessionLogFile(session) : undefined;
+      if (!session || !currentFile) return;
+
+      const renamed = buildRenamedLogFilename(name, currentFile);
+      if (!renamed) return;
+
+      void renameRunLog(currentFile, renamed)
+        .then((result) => {
+          logCaptureFilesRef.current.set(sessionId, result.path);
+          setTerminalSessions((prev) =>
+            prev.map((item) =>
+              item.id === sessionId ? { ...item, saveLogsFile: result.path } : item,
+            ),
+          );
+
+          const latest = terminalSessionsRef.current.find((item) => item.id === sessionId);
+          if (latest?.saveLogsEnabled) {
+            void flushLogCapture({ ...latest, name, saveLogsFile: result.path });
+          }
+        })
+        .catch((error) => {
+          console.error('Could not rename terminal log file:', error);
+        });
+    },
+    [flushLogCapture, resolveSessionLogFile],
+  );
+
+  const handleRenameNodeCard = useCallback(
+    (nodeId: string, cardTitle: string) => {
+      const trimmed = cardTitle.trim();
+      if (!trimmed) return;
+
+      const node = nodes.find((item) => item.id === nodeId);
+      if (!node || node.data.workflowGroupId) return;
+
+      const signature = singleNodeSignature(node);
+
+      setNodes((prev) =>
+        prev.map((item) =>
+          item.id === nodeId ? { ...item, data: { ...item.data, cardTitle: trimmed } } : item,
+        ),
+      );
+
+      setTerminalSessions((prev) => {
+        const next = prev.map((session) =>
+          session.workflowSignature === signature ? { ...session, name: trimmed } : session,
+        );
+        const matched = next.find((session) => session.workflowSignature === signature);
+        if (matched) {
+          syncSessionLogFilename(matched.id, trimmed);
+        }
+        return next;
+      });
+    },
+    [nodes, syncSessionLogFilename],
+  );
+
+  const canRenameTerminalSession = useCallback(
+    (sessionId: string) => {
+      const session = terminalSessionsRef.current.find((item) => item.id === sessionId);
+      if (!session?.workflowSignature) return true;
+
+      const parsed = parseSingleNodeSignature(session.workflowSignature);
+      if (!parsed) return true;
+
+      const node = nodes.find((item) => item.id === parsed.nodeId);
+      return !node?.data.workflowGroupId;
+    },
+    [nodes],
   );
 
   const handleSaveGroup = useCallback(
@@ -1587,36 +1738,26 @@ function AppShell() {
       if (!trimmed) return;
 
       const session = terminalSessionsRef.current.find((item) => item.id === sessionId);
-      const currentFile = session ? resolveSessionLogFile(session) : undefined;
+      if (!session || !canRenameTerminalSession(sessionId)) return;
 
       setTerminalSessions((prev) =>
         prev.map((item) => (item.id === sessionId ? { ...item, name: trimmed } : item)),
       );
 
-      if (!session || !currentFile) return;
+      const parsed = parseSingleNodeSignature(session.workflowSignature);
+      if (parsed) {
+        setNodes((prev) =>
+          prev.map((item) =>
+            item.id === parsed.nodeId
+              ? { ...item, data: { ...item.data, cardTitle: trimmed } }
+              : item,
+          ),
+        );
+      }
 
-      const renamed = buildRenamedLogFilename(trimmed, currentFile);
-      if (!renamed) return;
-
-      void renameRunLog(currentFile, renamed)
-        .then((result) => {
-          logCaptureFilesRef.current.set(sessionId, result.path);
-          setTerminalSessions((prev) =>
-            prev.map((item) =>
-              item.id === sessionId ? { ...item, saveLogsFile: result.path } : item,
-            ),
-          );
-
-          const latest = terminalSessionsRef.current.find((item) => item.id === sessionId);
-          if (latest?.saveLogsEnabled) {
-            void flushLogCapture({ ...latest, name: trimmed, saveLogsFile: result.path });
-          }
-        })
-        .catch((error) => {
-          console.error('Could not rename terminal log file:', error);
-        });
+      syncSessionLogFilename(sessionId, trimmed);
     },
-    [flushLogCapture, resolveSessionLogFile],
+    [canRenameTerminalSession, syncSessionLogFilename],
   );
 
   const hasRunningSessions = terminalSessions.some((session) => session.status === 'running');
@@ -1709,6 +1850,8 @@ function AppShell() {
             <GlobalContextMenu
               contexts={savedContexts}
               activeContextName={globalContext}
+              activeContextHealth={activeContextHealth}
+              activeContextHealthMessage={activeContextHealthMessage}
               onAddContext={handleAddSavedContext}
               onUpdateContext={handleUpdateSavedContext}
               onDeleteContext={handleDeleteSavedContext}
@@ -1833,6 +1976,8 @@ function AppShell() {
       <WorkflowStatusBar
         projectName={activeProjectName}
         globalContext={globalContext}
+        contextHealth={activeContextHealth}
+        contextHealthMessage={activeContextHealthMessage}
         nodeCount={commandNodeCount}
         edgeCount={edges.length}
         groupCount={workflowGroups.length}
@@ -1862,10 +2007,12 @@ function AppShell() {
           onSelectionChange={setSelectedNodeIds}
           onRunNode={runSingleNode}
           onDeleteNode={handleDeleteNode}
+          onRenameCardTitle={handleRenameNodeCard}
           onRunGroup={handleRunGroup}
           onUngroupGroup={handleUngroupGroup}
           onDeleteGroupNodes={handleDeleteGroupWithNodes}
           onResizeGroup={handleResizeGroup}
+          onNodesDelete={handleNodesDelete}
           highlightedGroupId={highlightedGroupId}
           runningGroupIds={runningGroupIds}
           isRunning={false}
@@ -1912,6 +2059,7 @@ function AppShell() {
         onResumeRun={handleResumeRun}
         onStopRun={handleStopRun}
         onToggleSaveLogs={toggleSaveLogs}
+        canRenameSession={canRenameTerminalSession}
         height={terminalHeight}
         onHeightChange={setTerminalHeight}
       />

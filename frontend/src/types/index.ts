@@ -38,6 +38,8 @@ export type CommandGroup = {
 export type CommandNodeData = {
   commandId: string;
   label: string;
+  cardTitle: string;
+  cardColor: string;
   category: string;
   group: string;
   groupLabel: string;

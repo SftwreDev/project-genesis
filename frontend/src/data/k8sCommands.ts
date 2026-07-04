@@ -44,7 +44,7 @@ export const K8S_COMMANDS: K8sCommandDef[] = [
     group: 'pods',
     description: 'Run a container image as a pod',
     kubectl: 'kubectl run <podName> --image=<image> -n <namespace>',
-    color: '#34d399',
+    color: '#10b981',
     fields: [
       nsField,
       { key: 'podName', label: 'Pod Name', placeholder: 'genesis', defaultValue: 'genesis' },
@@ -62,7 +62,7 @@ export const K8S_COMMANDS: K8sCommandDef[] = [
     group: 'pods',
     description: 'Remove a pod from the cluster',
     kubectl: 'kubectl delete pod <podName> -n <namespace>',
-    color: '#34d399',
+    color: '#ef4444',
     fields: [nsField, { key: 'podName', label: 'Pod Name', placeholder: 'genesis' }],
   },
   {
@@ -82,7 +82,7 @@ export const K8S_COMMANDS: K8sCommandDef[] = [
     group: 'pods',
     description: 'Stream logs from a running pod',
     kubectl: 'kubectl logs <podName> -n <namespace>',
-    color: '#34d399',
+    color: '#14b8a6',
     fields: [
       nsField,
       { key: 'podName', label: 'Pod Name', placeholder: 'genesis' },
@@ -99,7 +99,7 @@ export const K8S_COMMANDS: K8sCommandDef[] = [
     group: 'pods',
     description: 'Show detailed pod status and spec',
     kubectl: 'kubectl describe pod <podName> -n <namespace>',
-    color: '#34d399',
+    color: '#6ee7b7',
     fields: [nsField, { key: 'podName', label: 'Pod Name', placeholder: 'genesis' }],
   },
   // Deployments
@@ -120,7 +120,7 @@ export const K8S_COMMANDS: K8sCommandDef[] = [
     group: 'deployments',
     description: 'Show deployment status, replicas, and image',
     kubectl: 'kubectl describe deployment <deploymentName> -n <namespace>',
-    color: '#2dd4bf',
+    color: '#5eead4',
     fields: [nsField, { key: 'deploymentName', label: 'Deployment Name', placeholder: 'my-app' }],
   },
   {
@@ -130,7 +130,7 @@ export const K8S_COMMANDS: K8sCommandDef[] = [
     group: 'deployments',
     description: 'Run a replicated application deployment',
     kubectl: 'kubectl create deployment <deploymentName> --image=<image> -n <namespace>',
-    color: '#2dd4bf',
+    color: '#0891b2',
     fields: [
       nsField,
       { key: 'deploymentName', label: 'Deployment Name', placeholder: 'my-app', defaultValue: 'my-app' },
@@ -145,7 +145,7 @@ export const K8S_COMMANDS: K8sCommandDef[] = [
     group: 'deployments',
     description: 'Remove a deployment from the cluster',
     kubectl: 'kubectl delete deployment <deploymentName> -n <namespace>',
-    color: '#2dd4bf',
+    color: '#f97316',
     fields: [nsField, { key: 'deploymentName', label: 'Deployment Name', placeholder: 'my-app' }],
   },
   {
@@ -155,7 +155,7 @@ export const K8S_COMMANDS: K8sCommandDef[] = [
     group: 'deployments',
     description: 'Change the replica count for a deployment',
     kubectl: 'kubectl scale deployment <deploymentName> --replicas=<replicas> -n <namespace>',
-    color: '#2dd4bf',
+    color: '#06b6d4',
     fields: [
       nsField,
       { key: 'deploymentName', label: 'Deployment Name', placeholder: 'my-app' },
@@ -170,7 +170,7 @@ export const K8S_COMMANDS: K8sCommandDef[] = [
     group: 'scheduling',
     description: 'Allow a pod to schedule onto tainted nodes',
     kubectl: 'kubectl patch pod <podName> -n <namespace> --tolerations=...',
-    color: '#22d3ee',
+    color: '#0ea5e9',
     fields: [
       nsField,
       { key: 'podName', label: 'Pod Name', placeholder: 'genesis' },
@@ -198,7 +198,7 @@ export const K8S_COMMANDS: K8sCommandDef[] = [
     group: 'nodes',
     description: 'Show node capacity, conditions, and taints',
     kubectl: 'kubectl describe node <nodeName>',
-    color: '#a78bfa',
+    color: '#c4b5fd',
     fields: [{ key: 'nodeName', label: 'Node Name', placeholder: 'minikube' }],
   },
   {
@@ -208,7 +208,7 @@ export const K8S_COMMANDS: K8sCommandDef[] = [
     group: 'taints',
     description: 'Mark a node unschedulable unless tolerated',
     kubectl: 'kubectl taint nodes <nodeName> <taintKey>=<taintValue>:<taintEffect>',
-    color: '#c084fc',
+    color: '#9333ea',
     fields: [
       { key: 'nodeName', label: 'Node Name', placeholder: 'minikube' },
       { key: 'taintKey', label: 'Taint Key', placeholder: 'dedicated' },
@@ -223,7 +223,7 @@ export const K8S_COMMANDS: K8sCommandDef[] = [
     group: 'taints',
     description: 'Remove a taint from a node',
     kubectl: 'kubectl taint nodes <nodeName> <taintKey>-',
-    color: '#c084fc',
+    color: '#d946ef',
     fields: [
       { key: 'nodeName', label: 'Node Name', placeholder: 'minikube' },
       { key: 'taintKey', label: 'Taint Key', placeholder: 'dedicated' },
@@ -237,7 +237,7 @@ export const K8S_COMMANDS: K8sCommandDef[] = [
     group: 'services',
     description: 'Expose pods with a cluster service',
     kubectl: 'kubectl expose ... --port=<port> -n <namespace>',
-    color: '#60a5fa',
+    color: '#3b82f6',
     fields: [
       nsField,
       { key: 'serviceName', label: 'Service Name', placeholder: 'my-service', defaultValue: 'my-service' },
@@ -264,7 +264,7 @@ export const K8S_COMMANDS: K8sCommandDef[] = [
     group: 'services',
     description: 'Remove a service from the cluster',
     kubectl: 'kubectl delete service <serviceName> -n <namespace>',
-    color: '#60a5fa',
+    color: '#2563eb',
     fields: [nsField, { key: 'serviceName', label: 'Service Name', placeholder: 'my-service' }],
   },
   // Config
@@ -275,7 +275,7 @@ export const K8S_COMMANDS: K8sCommandDef[] = [
     group: 'configmaps',
     description: 'Store non-sensitive configuration data',
     kubectl: 'kubectl create configmap <name> --from-literal=<key>=<value>',
-    color: '#fbbf24',
+    color: '#eab308',
     fields: [
       nsField,
       { key: 'configMapName', label: 'ConfigMap Name', placeholder: 'app-config', defaultValue: 'app-config' },
@@ -300,7 +300,7 @@ export const K8S_COMMANDS: K8sCommandDef[] = [
     group: 'configmaps',
     description: 'Remove a configmap from the cluster',
     kubectl: 'kubectl delete configmap <configMapName> -n <namespace>',
-    color: '#fbbf24',
+    color: '#f59e0b',
     fields: [nsField, { key: 'configMapName', label: 'ConfigMap Name', placeholder: 'app-config' }],
   },
   // Cluster
@@ -321,7 +321,7 @@ export const K8S_COMMANDS: K8sCommandDef[] = [
     group: 'namespaces',
     description: 'Provision a new namespace',
     kubectl: 'kubectl create namespace <namespace>',
-    color: '#e879f9',
+    color: '#ec4899',
     fields: [{ key: 'namespace', label: 'Namespace', placeholder: 'dev', defaultValue: 'dev' }],
   },
   {
@@ -331,12 +331,50 @@ export const K8S_COMMANDS: K8sCommandDef[] = [
     group: 'namespaces',
     description: 'Remove a namespace and its resources',
     kubectl: 'kubectl delete namespace <namespace>',
-    color: '#e879f9',
+    color: '#db2777',
     fields: [{ key: 'namespace', label: 'Namespace', placeholder: 'dev' }],
   },
   ...WORKFLOW_TOOLS,
   ...INTEGRATION_COMMANDS,
 ];
+
+/** One distinct accent per command template — single source of truth for card colors. */
+const COMMAND_ACCENT_COLORS: Record<string, string> = {
+  'create-pod': '#10b981',
+  'delete-pod': '#ef4444',
+  'list-pods': '#22c55e',
+  'get-pod-logs': '#14b8a6',
+  'describe-pod': '#84cc16',
+  'list-deployments': '#06b6d4',
+  'describe-deployment': '#0891b2',
+  'create-deployment': '#0ea5e9',
+  'delete-deployment': '#f97316',
+  'scale-deployment': '#0284c7',
+  'add-pod-toleration': '#2dd4bf',
+  'list-nodes': '#8b5cf6',
+  'describe-node': '#a78bfa',
+  'add-node-taint': '#7c3aed',
+  'remove-node-taint': '#d946ef',
+  'create-service': '#3b82f6',
+  'list-services': '#6366f1',
+  'delete-service': '#1d4ed8',
+  'create-configmap': '#eab308',
+  'list-configmaps': '#f59e0b',
+  'delete-configmap': '#ca8a04',
+  'list-namespaces': '#ec4899',
+  'create-namespace': '#f472b6',
+  'delete-namespace': '#db2777',
+  'workflow-delay': '#fb923c',
+  'workflow-schedule': '#f43f5e',
+  'workflow-condition': '#818cf8',
+  'workflow-start': '#34d399',
+  'workflow-end': '#f87171',
+  'slack-notify': '#611f69',
+};
+
+export function getCommandAccentColor(commandId: string): string {
+  return COMMAND_ACCENT_COLORS[commandId] ?? getCommandById(commandId)?.color ?? '#64748b';
+}
 
 export function getCommandById(id: string): K8sCommandDef | undefined {
   return K8S_COMMANDS.find((cmd) => cmd.id === id);
@@ -353,16 +391,19 @@ export function defaultParamsForCommand(command: K8sCommandDef): Record<string, 
   }, {});
 }
 
-export function createCommandNodeData(command: K8sCommandDef) {
+export function createCommandNodeData(command: K8sCommandDef, cardColor?: string) {
   const params = defaultParamsForCommand(command);
   const group = getGroupById(command.group);
+  const accentColor = cardColor ?? getCommandAccentColor(command.id);
   return {
     commandId: command.id,
     label: command.label,
+    cardTitle: command.label,
+    cardColor: accentColor,
     category: command.category,
     group: command.group,
     groupLabel: group?.label ?? command.group,
-    color: command.color,
+    color: accentColor,
     kubectl: command.kubectl,
     params,
     context: '',

@@ -31,6 +31,25 @@ export function singleNodeSignature(node: Node<CommandNodeData>): string {
   return `node:${node.id}:${node.data.commandId}`;
 }
 
+export function getNodeCardTitle(node: Pick<Node<CommandNodeData>, 'data'>): string {
+  return node.data.cardTitle?.trim() || node.data.label;
+}
+
+export function parseSingleNodeSignature(
+  signature?: string,
+): { nodeId: string; commandId: string } | null {
+  if (!signature?.startsWith('node:')) return null;
+
+  const rest = signature.slice('node:'.length);
+  const separator = rest.indexOf(':');
+  if (separator <= 0) return null;
+
+  return {
+    nodeId: rest.slice(0, separator),
+    commandId: rest.slice(separator + 1),
+  };
+}
+
 export function groupSignature(groupId: string, nodeIds: string[], edges: Edge[]): string {
   return `group:${groupId}:${workflowSignature(nodeIds, edges)}`;
 }

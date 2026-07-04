@@ -1,8 +1,11 @@
 import { CircleDot, CircleCheck } from 'lucide-react';
+import type { ContextHealthStatus } from '../utils/contextHealth';
 
 type Props = {
   projectName: string | null;
   globalContext: string;
+  contextHealth?: ContextHealthStatus;
+  contextHealthMessage?: string;
   nodeCount: number;
   edgeCount: number;
   groupCount: number;
@@ -19,9 +22,34 @@ function Stat({ label, value }: { label: string; value: number }) {
   );
 }
 
+function contextHealthTitle(
+  globalContext: string,
+  status: ContextHealthStatus,
+  message: string,
+): string {
+  if (!globalContext.trim()) {
+    return 'No global kube context enabled';
+  }
+
+  switch (status) {
+    case 'connected':
+      return message || `Context "${globalContext}" is connected`;
+    case 'expired':
+      return message || `Context "${globalContext}" expired — re-login with kubectl`;
+    case 'unreachable':
+      return message || `Context "${globalContext}" unreachable`;
+    case 'unknown':
+      return `Checking context "${globalContext}"...`;
+    default:
+      return `Active kube context: ${globalContext}`;
+  }
+}
+
 export default function WorkflowStatusBar({
   projectName,
   globalContext,
+  contextHealth = 'idle',
+  contextHealthMessage = '',
   nodeCount,
   edgeCount,
   groupCount,
@@ -37,6 +65,8 @@ export default function WorkflowStatusBar({
       ? 'Saved'
       : 'Ready';
 
+  const showHealth = Boolean(globalContext.trim()) && contextHealth !== 'idle';
+
   return (
     <div className="workflow-status" aria-label="Workflow status">
       <div className="workflow-status__start">
@@ -49,8 +79,14 @@ export default function WorkflowStatusBar({
         </span>
         <span
           className={`workflow-status__context${globalContext ? '' : ' workflow-status__context--empty'}`}
-          title={globalContext ? 'Active kube context' : 'No global kube context enabled'}
+          title={contextHealthTitle(globalContext, contextHealth, contextHealthMessage)}
         >
+          {showHealth && (
+            <span
+              className={`workflow-status__context-dot workflow-status__context-dot--${contextHealth}`}
+              aria-hidden="true"
+            />
+          )}
           {globalContext || 'No context'}
         </span>
 

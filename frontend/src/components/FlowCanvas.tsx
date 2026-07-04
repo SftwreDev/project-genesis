@@ -1,4 +1,4 @@
-import { useCallback, useMemo } from 'react';
+import { useCallback, useMemo, useRef } from 'react';
 import {
   ReactFlow,
   MiniMap,
@@ -19,7 +19,7 @@ import '@xyflow/react/dist/style.css';
 import CommandNode from './CommandNode';
 import GroupBackgroundNode from './GroupBackgroundNode';
 import { DRAG_TYPE } from './CommandPalette';
-import { createCommandNodeData, getCommandById } from '../data/k8sCommands';
+import { createCommandNodeData, getCommandAccentColor, getCommandById } from '../data/k8sCommands';
 import type { CommandNodeData, WorkflowGroup } from '../types';
 import {
   GROUP_BACKGROUND_PREFIX,
@@ -37,10 +37,12 @@ type Props = {
   onSelectionChange: (nodeIds: string[]) => void;
   onRunNode: (nodeId: string) => void;
   onDeleteNode: (nodeId: string) => void;
+  onRenameCardTitle: (nodeId: string, cardTitle: string) => void;
   onRunGroup: (groupId: string) => void;
   onUngroupGroup: (groupId: string) => void;
   onDeleteGroupNodes: (groupId: string) => void;
   onResizeGroup: (groupId: string, frame: import('../types').WorkflowGroupFrame) => void;
+  onNodesDelete: (deleted: Node<CommandNodeData>[]) => void;
   highlightedGroupId: string | null;
   runningGroupIds: Set<string>;
   isRunning: boolean;
@@ -64,10 +66,12 @@ export default function FlowCanvas({
   onSelectionChange,
   onRunNode,
   onDeleteNode,
+  onRenameCardTitle,
   onRunGroup,
   onUngroupGroup,
   onDeleteGroupNodes,
   onResizeGroup,
+  onNodesDelete,
   highlightedGroupId,
   runningGroupIds,
   isRunning,
@@ -76,6 +80,37 @@ export default function FlowCanvas({
   onRecordHistory,
 }: Props) {
   const { screenToFlowPosition } = useReactFlow();
+  const commandCallbacksRef = useRef({
+    onRunNode,
+    onDeleteNode,
+    onRenameCardTitle,
+    isRunning,
+    globalContext,
+    nodes,
+    edges,
+  });
+  commandCallbacksRef.current = {
+    onRunNode,
+    onDeleteNode,
+    onRenameCardTitle,
+    isRunning,
+    globalContext,
+    nodes,
+    edges,
+  };
+
+  const groupCallbacksRef = useRef({
+    onRunGroup,
+    onUngroupGroup,
+    onDeleteGroupNodes,
+    onResizeGroup,
+  });
+  groupCallbacksRef.current = {
+    onRunGroup,
+    onUngroupGroup,
+    onDeleteGroupNodes,
+    onResizeGroup,
+  };
 
   const groupBackgroundNodes = useMemo(() => {
     return workflowGroups.flatMap((group) => {
@@ -111,35 +146,47 @@ export default function FlowCanvas({
     });
   }, [highlightedGroupId, nodes, runningGroupIds, workflowGroups]);
 
+  const commandNodes = useMemo(
+    () => nodes,
+    [nodes],
+  );
+
   const displayNodes = useMemo(
-    () => [...groupBackgroundNodes, ...nodes] as Node<CommandNodeData>[],
-    [groupBackgroundNodes, nodes],
+    () => [...groupBackgroundNodes, ...commandNodes] as Node<CommandNodeData>[],
+    [commandNodes, groupBackgroundNodes],
   );
 
   const nodeTypes = useMemo(
     () => ({
-      command: (props: NodeProps) => (
-        <CommandNode
-          {...props}
-          onRunNode={onRunNode}
-          onDeleteNode={onDeleteNode}
-          isRunning={isRunning}
-          globalContext={globalContext}
-          workflowNodes={nodes}
-          workflowEdges={edges}
-        />
-      ),
-      groupBackground: (props: NodeProps) => (
-        <GroupBackgroundNode
-          {...props}
-          onRunGroup={onRunGroup}
-          onUngroupGroup={onUngroupGroup}
-          onDeleteGroupNodes={onDeleteGroupNodes}
-          onResizeGroup={onResizeGroup}
-        />
-      ),
+      command: (props: NodeProps) => {
+        const callbacks = commandCallbacksRef.current;
+        return (
+          <CommandNode
+            {...props}
+            onRunNode={callbacks.onRunNode}
+            onDeleteNode={callbacks.onDeleteNode}
+            onRenameCardTitle={callbacks.onRenameCardTitle}
+            isRunning={callbacks.isRunning}
+            globalContext={callbacks.globalContext}
+            workflowNodes={callbacks.nodes}
+            workflowEdges={callbacks.edges}
+          />
+        );
+      },
+      groupBackground: (props: NodeProps) => {
+        const callbacks = groupCallbacksRef.current;
+        return (
+          <GroupBackgroundNode
+            {...props}
+            onRunGroup={callbacks.onRunGroup}
+            onUngroupGroup={callbacks.onUngroupGroup}
+            onDeleteGroupNodes={callbacks.onDeleteGroupNodes}
+            onResizeGroup={callbacks.onResizeGroup}
+          />
+        );
+      },
     }),
-    [edges, globalContext, nodes, onDeleteGroupNodes, onDeleteNode, onResizeGroup, onRunGroup, onRunNode, onUngroupGroup, isRunning],
+    [],
   );
 
   const handleNodesChange = useCallback(
@@ -159,6 +206,17 @@ export default function FlowCanvas({
     [onConnectProp],
   );
 
+  const handleNodesDelete = useCallback(
+    (deleted: Node[]) => {
+      const commandNodesDeleted = deleted.filter(
+        (node) => !isGroupBackgroundNode(node.id),
+      ) as Node<CommandNodeData>[];
+      if (commandNodesDeleted.length === 0) return;
+      onNodesDelete(commandNodesDeleted);
+    },
+    [onNodesDelete],
+  );
+
   const onDragOver = useCallback((event: React.DragEvent) => {
     event.preventDefault();
     event.dataTransfer.dropEffect = 'move';
@@ -174,26 +232,27 @@ export default function FlowCanvas({
       const position = screenToFlowPosition({ x: event.clientX, y: event.clientY });
       const id = `${command.id}-${Date.now()}`;
 
-      const newNode: Node<CommandNodeData> = {
-        id,
-        type: 'command',
-        position,
-        data: createCommandNodeData(command),
-      };
-
       onRecordHistory?.();
-      setNodes((nds) => nds.concat(newNode));
-      onNodeSelect(newNode);
+      setNodes((nds) => {
+        const newNode: Node<CommandNodeData> = {
+          id,
+          type: 'command',
+          position,
+          data: createCommandNodeData(command),
+        };
+        onNodeSelect(newNode);
+        return nds.concat(newNode);
+      });
     },
     [onNodeSelect, onRecordHistory, screenToFlowPosition, setNodes],
   );
 
   const handleSelectionChange: OnSelectionChangeFunc = useCallback(
     ({ nodes: selectedNodes }) => {
-      const commandNodes = selectedNodes.filter((node) => !isGroupBackgroundNode(node.id));
-      onSelectionChange(commandNodes.map((node) => node.id));
-      if (commandNodes.length === 1) {
-        onNodeSelect(commandNodes[0] as Node<CommandNodeData>);
+      const commandNodesSelected = selectedNodes.filter((node) => !isGroupBackgroundNode(node.id));
+      onSelectionChange(commandNodesSelected.map((node) => node.id));
+      if (commandNodesSelected.length === 1) {
+        onNodeSelect(commandNodesSelected[0] as Node<CommandNodeData>);
       } else {
         onNodeSelect(null);
       }
@@ -210,10 +269,12 @@ export default function FlowCanvas({
         onNodesChange={handleNodesChange}
         onEdgesChange={onEdgesChange}
         onConnect={onConnect}
+        onNodesDelete={handleNodesDelete}
         onSelectionChange={handleSelectionChange}
         deleteKeyCode={['Backspace', 'Delete']}
         edgesFocusable
         edgesReconnectable={false}
+        connectOnClick={false}
         onNodeClick={(_, node) => {
           if (isGroupBackgroundNode(node.id)) return;
           onNodeSelect(node as Node<CommandNodeData>);
@@ -241,7 +302,8 @@ export default function FlowCanvas({
             if (isGroupBackgroundNode(node.id)) {
               return (node.data as { color?: string }).color ?? '#38bdf8';
             }
-            return (node.data as CommandNodeData).color;
+            const data = node.data as CommandNodeData;
+            return getCommandAccentColor(data.commandId);
           }}
           maskColor="rgba(15, 23, 42, 0.75)"
         />

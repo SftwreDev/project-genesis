@@ -8,6 +8,7 @@ import type {
   WorkflowProjectPayload,
   WorkflowProjectSummary,
 } from '../types';
+import { getCommandAccentColor } from '../data/k8sCommands';
 
 export function buildWorkflowProjectPayload(
   nodes: Node<CommandNodeData>[],
@@ -21,6 +22,7 @@ export function buildWorkflowProjectPayload(
       ...node,
       data: {
         ...node.data,
+        cardTitle: node.data.cardTitle?.trim() || node.data.label,
         runStatus: 'idle',
         timerSeconds: null,
         timerTotalSeconds: null,
@@ -35,15 +37,21 @@ export function buildWorkflowProjectPayload(
 
 export function normalizeLoadedProjectPayload(payload: WorkflowProjectPayload): WorkflowProjectPayload {
   return {
-    nodes: (payload.nodes ?? []).map((node) => ({
-      ...node,
-      data: {
-        ...node.data,
-        runStatus: 'idle',
-        timerSeconds: null,
-        timerTotalSeconds: null,
-      },
-    })),
+    nodes: (payload.nodes ?? []).map((node) => {
+      const commandColor = getCommandAccentColor(node.data.commandId);
+      return {
+        ...node,
+        data: {
+          ...node.data,
+          cardTitle: node.data.cardTitle?.trim() || node.data.label,
+          color: commandColor,
+          cardColor: commandColor,
+          runStatus: 'idle',
+          timerSeconds: null,
+          timerTotalSeconds: null,
+        },
+      };
+    }),
     edges: payload.edges ?? [],
     workflowGroups: payload.workflowGroups ?? [],
     savedContexts: payload.savedContexts ?? [],
@@ -58,6 +66,7 @@ function stableNodeSnapshot(node: Node<CommandNodeData>) {
     position: node.position,
     data: {
       commandId: node.data.commandId,
+      cardTitle: node.data.cardTitle?.trim() || node.data.label,
       params: node.data.params,
       yamlContent: node.data.yamlContent ?? '',
       context: node.data.context ?? '',

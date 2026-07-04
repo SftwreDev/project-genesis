@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { ChevronDown, ChevronRight, GripVertical, Search } from 'lucide-react';
-import { COMMAND_CATEGORIES, COMMAND_GROUPS, K8S_COMMANDS } from '../data/k8sCommands';
+import { COMMAND_CATEGORIES, COMMAND_GROUPS, K8S_COMMANDS, getCommandAccentColor } from '../data/k8sCommands';
 
 const DRAG_TYPE = 'application/k8s-command';
 
@@ -90,7 +90,7 @@ export default function CommandPalette() {
                                   e.dataTransfer.setData(DRAG_TYPE, cmd.id);
                                   e.dataTransfer.effectAllowed = 'move';
                                 }}
-                                style={{ borderLeftColor: cmd.color }}
+                                style={{ borderLeftColor: getCommandAccentColor(cmd.id) }}
                               >
                                 <GripVertical size={14} className="palette__grip" />
                                 <div>
